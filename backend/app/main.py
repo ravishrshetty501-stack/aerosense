@@ -1,0 +1,85 @@
+import time
+from contextlib import asynccontextmanager
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from app.core.config import settings
+from app.core.database import engine, Base
+
+# Import all models so SQLAlchemy discovers them before creating tables
+import app.models.user
+import app.models.measurement
+import app.models.alert
+import app.models.chat
+import app.models.report
+
+# Import Routers
+from app.api.v1.auth import router as auth_router
+from app.api.v1.locations import router as locations_router
+from app.api.v1.air_quality import router as air_quality_router
+from app.api.v1.aqi import router as aqi_router
+from app.api.v1.analytics import router as analytics_router
+from app.api.v1.ai import router as ai_router
+from app.api.v1.alerts import router as alerts_router
+from app.api.v1.reports import router as reports_router
+from app.api.v1.users import router as users_router
+from app.api.v1.system import router as system_router
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: ensure tables exist
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield
+    # Shutdown
+    await engine.dispose()
+
+app = FastAPI(
+    title=settings.PROJECT_NAME,
+    version=settings.VERSION,
+    description="AeroSense AI — Global Urban Air Quality Intelligence & Environmental Health Assistant API",
+    lifespan=lifespan
+)
+
+# CORS Middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Performance & Security headers middleware
+@app.middleware("http")
+async def add_process_time_and_security_headers(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    process_time = time.time() - start_time
+    response.headers["X-Process-Time"] = f"{process_time:.4f}s"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    return response
+
+# Include API v1 Routers
+app.include_router(auth_router, prefix=settings.API_V1_STR)
+app.include_router(locations_router, prefix=settings.API_V1_STR)
+app.include_router(air_quality_router, prefix=settings.API_V1_STR)
+app.include_router(aqi_router, prefix=settings.API_V1_STR)
+app.include_router(analytics_router, prefix=settings.API_V1_STR)
+app.include_router(ai_router, prefix=settings.API_V1_STR)
+app.include_router(alerts_router, prefix=settings.API_V1_STR)
+app.include_router(reports_router, prefix=settings.API_V1_STR)
+app.include_router(users_router, prefix=settings.API_V1_STR)
+app.include_router(system_router, prefix=settings.API_V1_STR)
+
+@app.get("/")
+async def root():
+    return {
+        "name": settings.PROJECT_NAME,
+        "version": settings.VERSION,
+        "status": "operational",
+        "docs": "/docs",
+        "health": f"{settings.API_V1_STR}/system/health"
+    }

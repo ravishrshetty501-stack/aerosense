@@ -1,0 +1,22 @@
+{
+  "short_name": "AeroSense",
+  "name": "AeroSense AI — Global Air Quality Intelligence",
+  "description": "Understand the air. Predict the risk. Make better decisions.",
+  "icons": [
+    {
+      "src": "/icon-192.png",
+      "type": "image/png",
+      "sizes": "192x192"
+    },
+    {
+      "src": "/icon-512.png",
+      "type": "image/png",
+      "sizes": "512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#070b14",
+  "theme_color": "#0b1329",
+  "display": "standalone",
+  "orientation": "portrait-primary"
+}
