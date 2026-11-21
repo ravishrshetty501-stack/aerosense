@@ -28,11 +28,33 @@ async def compare_cities(
     cities: List[str] = Query(..., description="List of city names, e.g. ?cities=London&cities=Tokyo"),
     standard: str = Query("US_EPA")
 ):
+    """
+    Compares air quality across distinct cities.
+    Enforces canonical deduplication so no city is analyzed or presented twice.
+    """
+    seen_canonical = set()
+    unique_city_queries = []
+    
+    for c in cities:
+        c_clean = c.strip()
+        c_lower = c_clean.lower()
+        if c_clean and c_lower not in seen_canonical:
+            seen_canonical.add(c_lower)
+            unique_city_queries.append(c_clean)
+
     results = []
-    for c in cities[:5]:
+    seen_coords = set()
+
+    for c in unique_city_queries[:5]:
         locs = await data_manager.search_cities(c)
         if locs:
             t = locs[0]
+            # Verify coordinates are not a duplicate of an already added city
+            coord_key = (round(t["latitude"], 2), round(t["longitude"], 2))
+            if coord_key in seen_coords:
+                continue
+            seen_coords.add(coord_key)
+
             aq_res = await data_manager.get_unified_air_quality(t["latitude"], t["longitude"], t["name"], standard)
             std_res = aq_res.aqi_standard_results.get(standard, {})
             results.append({
@@ -52,4 +74,5 @@ async def compare_cities(
                 "is_ground_observation": aq_res.is_ground_observation,
                 "freshness_minutes": aq_res.data_freshness_minutes
             })
+
     return {"standard": standard, "comparison": results}

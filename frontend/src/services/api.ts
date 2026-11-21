@@ -160,5 +160,11 @@ export const api = {
     const res = await fetch(`${API_BASE}/system/health`);
     if (!res.ok) throw new Error('Health check failed');
     return res.json();
+  },
+
+  async getNetworkStatus() {
+    const res = await fetch(`${API_BASE}/system/network-status`);
+    if (!res.ok) throw new Error('Failed to fetch network status');
+    return res.json();
   }
 };

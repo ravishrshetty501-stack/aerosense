@@ -8,46 +8,80 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Hybrid Design System Tokens: Atlas Explorer × Air Intelligence Observatory × Atmosphere 360
+        atlas: {
+          bg: '#F5F7F5',
+          surface: '#FFFFFF',
+          subtle: '#EEF2EF',
+          border: '#DCE5E0',
+          text: '#172522',
+          muted: '#687771',
+          accent: '#087F73',
+          secondary: '#256D83',
+          success: '#16865C',
+          warning: '#C17A19',
+          danger: '#C64747',
+        },
+        darkAtlas: {
+          bg: '#101714',
+          surface: '#17211D',
+          subtle: '#202D27',
+          border: '#2B3A33',
+          text: '#EDF4EF',
+          muted: '#A4B4AA',
+          accent: '#42B8A4',
+          secondary: '#69A9B4',
+          success: '#4BBF87',
+          warning: '#E6AC54',
+          danger: '#E46D6D',
+        },
+        // Backward compatibility mappings
+        clima: {
+          bg: '#F5F7F5',
+          surface: '#FFFFFF',
+          subtle: '#EEF2EF',
+          border: '#DCE5E0',
+          text: '#172522',
+          muted: '#687771',
+          accent: '#087F73',
+          secondary: '#256D83',
+        },
+        darkClima: {
+          bg: '#101714',
+          surface: '#17211D',
+          subtle: '#202D27',
+          border: '#2B3A33',
+          text: '#EDF4EF',
+          muted: '#A4B4AA',
+          accent: '#42B8A4',
+          secondary: '#69A9B4',
+        },
         navy: {
-          950: '#070b14',
-          900: '#0b1329',
-          850: '#0f1b38',
-          800: '#14234b',
-          700: '#1e3369',
-          600: '#2a478f',
-        },
-        charcoal: {
-          950: '#0a0d12',
-          900: '#111620',
-          850: '#171e2c',
-          800: '#1e2738',
-          700: '#2c374d',
-        },
-        surface: {
-          base: '#0b1329',
-          panel: '#111b36',
-          card: '#162344',
-          border: 'rgba(56, 189, 248, 0.12)',
-          highlight: 'rgba(56, 189, 248, 0.06)',
+          950: '#101714',
+          900: '#17211D',
+          850: '#202D27',
+          800: '#263830',
+          700: '#2B3A33',
         },
         cyanAccent: {
-          DEFAULT: '#00f2fe',
-          glow: 'rgba(0, 242, 254, 0.18)',
-          dim: '#00b4d8',
-        },
-        aqi: {
-          good: '#10b981',        // Green
-          moderate: '#f59e0b',    // Amber / Yellow
-          sensitive: '#f97316',   // Orange
-          unhealthy: '#ef4444',   // Red
-          veryUnhealthy: '#8b5cf6', // Purple
-          hazardous: '#7f1d1d',   // Maroon
+          DEFAULT: '#087F73',
+          dim: '#256D83',
         }
       },
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+        sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        mono: ['"IBM Plex Mono"', 'JetBrains Mono', 'Fira Code', 'monospace'],
       },
+      borderRadius: {
+        'sm-control': '6px',
+        'std-panel': '10px',
+        'lg-map': '12px',
+      },
+      boxShadow: {
+        'subtle': '0 1px 3px 0 rgba(23, 37, 34, 0.04), 0 1px 2px -1px rgba(23, 37, 34, 0.04)',
+        'floating': '0 4px 16px -2px rgba(23, 37, 34, 0.06), 0 2px 4px -1px rgba(23, 37, 34, 0.03)',
+        'floating-dark': '0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 2px 6px -1px rgba(0, 0, 0, 0.25)',
+      }
     },
   },
   plugins: [],

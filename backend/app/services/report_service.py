@@ -165,9 +165,9 @@ class ReportService:
         # Disclaimer
         story.append(HRFlowable(width="100%", thickness=0.5, color=colors.HexColor('#cbd5e1'), spaceAfter=10))
         disclaimer = (
-            "<i>Attribution Notice: Real-time environmental readings are ingested from OpenAQ API v3 and Open-Meteo Air Quality APIs. "
-            "Calculations comply with US EPA, India CPCB, and EEA standards. This report provides ambient environmental metrics and general public health guidance; "
-            "it is not intended as personalized medical diagnosis.</i>"
+            "<i>Attribution Notice: Real-time environmental observations are ingested from the WAQI Ground Station Network "
+            "and Copernicus / Open-Meteo Atmospheric Models. Calculations comply with US EPA, India CPCB, and EEA standards. "
+            "This report provides ambient environmental metrics and general public health guidance; it is not intended as personalized medical diagnosis.</i>"
         )
         story.append(Paragraph(disclaimer, ParagraphStyle('Disclaimer', fontSize=8, leading=11, textColor=colors.HexColor('#64748b'))))
 

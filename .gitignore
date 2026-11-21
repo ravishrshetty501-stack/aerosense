@@ -14,9 +14,15 @@ frontend/.vite/
 
 # Environment Variables & Secrets
 .env
+.env.*
+!.env.example
 backend/.env
+backend/.env.*
+!backend/.env.example
 frontend/.env
+frontend/.env.*
 *.pem
+*.log
 
 # IDE & OS
 .vscode/

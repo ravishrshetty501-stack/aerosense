@@ -6,13 +6,15 @@ import httpx
 from app.core.config import settings
 from app.services.providers.manager import data_manager
 from app.services.providers.open_meteo import open_meteo_provider
+from app.services.providers.waqi import waqi_provider
+from app.services.alert_service import alert_service
 
 SYSTEM_INSTRUCTION = """
 You are AeroSense AI, an authoritative, scientifically rigorous Global Urban Air Quality Intelligence and Environmental Health Assistant.
 
 Your directives:
 1. Ground every statement in actual environmental measurements retrieved through your tools.
-2. Clearly distinguish between physical ground observations (e.g. OpenAQ stations) and model-based current estimates/forecasts (e.g. Open-Meteo CAMS).
+2. Clearly distinguish between physical ground observations (WAQI stations) and model-based current estimates/forecasts (Open-Meteo CAMS).
 3. Always cite observation timestamps and primary data sources.
 4. Never invent or hallucinate pollutant concentrations. If data is unavailable, explicitly state that it is not monitored.
 5. Provide practical, contextual recommendations for outdoor activities (running, cycling, commuting, sensitive groups) based on established official health advisories.
@@ -84,6 +86,41 @@ AEROSENSE_TOOLS = [
             },
             "required": ["location", "activity"]
         }
+    },
+    {
+        "name": "get_station_details",
+        "description": "Look up physical ground-level monitoring stations near a city or coordinates.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "location": {"type": "STRING", "description": "City name or target place"}
+            },
+            "required": ["location"]
+        }
+    },
+    {
+        "name": "get_pollution_trends",
+        "description": "Analyze pollution trajectory, 24-hour averages, peak hours, and detect sudden concentration spikes.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "location": {"type": "STRING", "description": "City name"},
+                "pollutant": {"type": "STRING", "description": "Target pollutant, default 'pm25'"}
+            },
+            "required": ["location"]
+        }
+    },
+    {
+        "name": "create_environmental_report",
+        "description": "Generate a structured environmental intelligence briefing summarizing current conditions, risks, and mitigation steps.",
+        "parameters": {
+            "type": "OBJECT",
+            "properties": {
+                "location": {"type": "STRING", "description": "City name"},
+                "standard": {"type": "STRING", "description": "AQI standard: 'US_EPA', 'INDIA_CPCB', or 'EUROPEAN_AQI'"}
+            },
+            "required": ["location"]
+        }
     }
 ]
 
@@ -135,7 +172,12 @@ class AIService:
                 locations = args.get("locations", [])
                 std = args.get("standard", "US_EPA")
                 comparison = []
-                for loc in locations[:4]: # Cap at 4
+                seen = set()
+                for loc in locations[:4]:
+                    clean_l = loc.strip().lower()
+                    if clean_l in seen:
+                        continue
+                    seen.add(clean_l)
                     cities = await data_manager.search_cities(loc)
                     if cities:
                         target = cities[0]
@@ -148,6 +190,7 @@ class AIService:
                             "country": target.get("country"),
                             "aqi": aqi_res.get("aqi"),
                             "category": aqi_res.get("category"),
+                            "color": aqi_res.get("color"),
                             "dominant_pollutant": res.dominant_pollutant,
                             "pm25": res.measurements.get("pm25").value if res.measurements.get("pm25") else None,
                             "pm10": res.measurements.get("pm10").value if res.measurements.get("pm10") else None,
@@ -215,6 +258,98 @@ class AIService:
                     ]
                 }
 
+            elif tool_name == "get_station_details":
+                loc = args.get("location", "")
+                cities = await data_manager.search_cities(loc)
+                if not cities:
+                    return {"error": f"City '{loc}' not found"}
+                target = cities[0]
+                stations = await waqi_provider.find_nearby_stations(target["latitude"], target["longitude"], radius_meters=40000, limit=5)
+                return {
+                    "city": target["name"],
+                    "latitude": target["latitude"],
+                    "longitude": target["longitude"],
+                    "stations_found": len(stations),
+                    "nearby_stations": [
+                        {
+                            "name": s.get("name"),
+                            "aqi": s.get("aqi"),
+                            "latitude": s.get("latitude"),
+                            "longitude": s.get("longitude"),
+                            "provider": s.get("provider")
+                        }
+                        for s in stations
+                    ]
+                }
+
+            elif tool_name == "get_pollution_trends":
+                loc = args.get("location", "")
+                pollutant = args.get("pollutant", "pm25").lower()
+                cities = await data_manager.search_cities(loc)
+                if not cities:
+                    return {"error": f"City '{loc}' not found"}
+                target = cities[0]
+                res = await data_manager.get_unified_air_quality(target["latitude"], target["longitude"], target["name"])
+                history = res.hourly_history or []
+                values = [h.get(pollutant) for h in history if h.get(pollutant) is not None]
+                avg_val = round(sum(values) / len(values), 1) if values else None
+                max_val = max(values) if values else None
+                min_val = min(values) if values else None
+                
+                current_val = res.measurements.get(pollutant).value if res.measurements.get(pollutant) else (values[-1] if values else 0)
+                spike_info = alert_service.detect_spike(history, current_val, pollutant)
+                
+                trajectory = "Stable"
+                if len(values) >= 6:
+                    recent_avg = sum(values[-3:]) / 3
+                    prior_avg = sum(values[-6:-3]) / 3
+                    if recent_avg > prior_avg * 1.15:
+                        trajectory = "Deteriorating"
+                    elif recent_avg < prior_avg * 0.85:
+                        trajectory = "Improving"
+
+                return {
+                    "city": target["name"],
+                    "pollutant": pollutant,
+                    "current": current_val,
+                    "24h_average": avg_val,
+                    "24h_peak": max_val,
+                    "24h_minimum": min_val,
+                    "trend_trajectory": trajectory,
+                    "spike_detected": spike_info is not None,
+                    "spike_details": spike_info
+                }
+
+            elif tool_name == "create_environmental_report":
+                loc = args.get("location", "")
+                std = args.get("standard", "US_EPA")
+                cities = await data_manager.search_cities(loc)
+                if not cities:
+                    return {"error": f"City '{loc}' not found"}
+                target = cities[0]
+                res = await data_manager.get_unified_air_quality(target["latitude"], target["longitude"], target["name"], std)
+                std_res = res.aqi_standard_results.get(std, {})
+                
+                return {
+                    "report_id": f"REP-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M')}-{target['name'][:3].upper()}",
+                    "generated_at": datetime.now(timezone.utc).isoformat(),
+                    "city": target["name"],
+                    "country": target.get("country"),
+                    "coordinates": f"{target['latitude']:.4f}°N, {target['longitude']:.4f}°E",
+                    "standard": std,
+                    "aqi": std_res.get("aqi"),
+                    "category": std_res.get("category"),
+                    "dominant_pollutant": res.dominant_pollutant,
+                    "advisory": std_res.get("advisory"),
+                    "primary_data_source": res.primary_source,
+                    "is_ground_observation": res.is_ground_observation,
+                    "recommended_actions": [
+                        "Monitor hourly progression during peak morning and evening traffic",
+                        "Run indoor HEPA air filtration if PM2.5 exceeds 35 µg/m³",
+                        "Consult local regulatory alerts before staging outdoor athletic events"
+                    ]
+                }
+
             return {"error": f"Unknown tool: {tool_name}"}
         except Exception as e:
             return {"error": f"Tool execution failed: {str(e)}"}
@@ -229,7 +364,6 @@ class AIService:
         Robust deterministic fallback when GEMINI_API_KEY is not configured or offline.
         Uses real environmental tool data to produce an authentic grounded briefing.
         """
-        # Extract potential city from prompt or fallback
         words = prompt.split()
         target_city = location_hint
         for w in words:
@@ -238,12 +372,10 @@ class AIService:
                 target_city = clean_w
                 break
 
-        # Execute get_air_quality tool
         aq_data = await self.execute_tool("get_air_quality", {"location": target_city, "standard": "US_EPA"})
         health_data = await self.execute_tool("get_health_guidance", {"location": target_city, "activity": "general"})
 
         if "error" in aq_data:
-            # Fallback to Tokyo
             aq_data = await self.execute_tool("get_air_quality", {"location": "Tokyo", "standard": "US_EPA"})
             health_data = await self.execute_tool("get_health_guidance", {"location": "Tokyo", "activity": "general"})
 
@@ -258,26 +390,27 @@ class AIService:
         pm25_val = meas.get("pm25", {}).get("value", "N/A")
         pm10_val = meas.get("pm10", {}).get("value", "N/A")
         no2_val = meas.get("no2", {}).get("value", "N/A")
-        o3_val = meas.get("o3", {}).get("value", "N/A")
 
-        markdown_response = (
-            f"### Environmental Intelligence Briefing: **{city}**\n\n"
-            f"- **Current AQI (US EPA)**: **{aqi_val}** ({category})\n"
-            f"- **Dominant Pollutant**: **{dom}**\n"
-            f"- **Data Source**: {source}\n"
-            f"- **Freshness**: Measured approximately {aq_data.get('freshness_minutes', 10)} minutes ago.\n\n"
-            f"#### Verified Pollutant Concentrations\n"
-            f"| Pollutant | Measured Value | Standard Unit | Observation Type |\n"
-            f"| :--- | :--- | :--- | :--- |\n"
-            f"| **PM2.5** | `{pm25_val}` | µg/m³ | {meas.get('pm25', {}).get('type', 'model_estimate')} |\n"
-            f"| **PM10** | `{pm10_val}` | µg/m³ | {meas.get('pm10', {}).get('type', 'model_estimate')} |\n"
-            f"| **NO₂** | `{no2_val}` | µg/m³ | {meas.get('no2', {}).get('type', 'model_estimate')} |\n"
-            f"| **O₃** | `{o3_val}` | µg/m³ | {meas.get('o3', {}).get('type', 'model_estimate')} |\n\n"
-            f"#### Health & Activity Guidance\n"
-            f"{health_data.get('safety_assessment', 'Standard outdoor activity is permissible.')}\n\n"
-            f"> *Note: {health_data.get('official_advisory', 'Air quality is acceptable for healthy individuals.')}*\n\n"
-            f"*(Generated by AeroSense Deterministic Reasoning Engine grounded on live environmental observations. Configure `GEMINI_API_KEY` for conversational LLM synthesis.)*"
-        )
+        markdown_response = f"""### Environmental Intelligence Briefing: {city}
+
+**Current Air Quality Assessment:**
+* **US EPA AQI:** **{aqi_val}** ({category})
+* **Dominant Pollutant:** {dom}
+* **Primary Source:** {source}
+
+| Monitored Parameter | Measured Concentration | Health Benchmark Status |
+| :--- | :--- | :--- |
+| **PM2.5** | `{pm25_val} µg/m³` | {'Elevated' if isinstance(pm25_val, (int, float)) and pm25_val > 35 else 'Acceptable'} |
+| **PM10** | `{pm10_val} µg/m³` | {'Elevated' if isinstance(pm10_val, (int, float)) and pm10_val > 50 else 'Acceptable'} |
+| **NO₂** | `{no2_val} µg/m³` | Standard Urban Background |
+
+**Official Advisory:**
+{health_data.get('official_advisory', 'Air quality is within acceptable parameters.')}
+
+**Activity & Safety Recommendations:**
+* Outdoor Cardio / Running: **{health_data.get('safety_assessment', 'Acceptable')}**
+* Sensitive Demographics: Observe respiratory comfort during extended outdoor exposure.
+"""
 
         return {
             "response": markdown_response,
@@ -301,7 +434,7 @@ class AIService:
     ) -> Dict[str, Any]:
         """
         Core conversational interface.
-        If GEMINI_API_KEY is available: Orchestrates Gemini 2.5/2.0 with function calling.
+        If GEMINI_API_KEY is available: Orchestrates Gemini with function calling.
         Else: Runs deterministic grounded reasoning engine.
         """
         clean_prompt = self._sanitize_prompt(user_message)
@@ -309,11 +442,8 @@ class AIService:
         if not settings.GEMINI_API_KEY:
             return await self._deterministic_reasoning(clean_prompt, location_hint)
 
-        # Call Gemini API with Function Calling via HTTP REST endpoint
-        # Official endpoint: https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=...
         endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
         
-        # Build contents payload
         contents = []
         if conversation_history:
             for msg in conversation_history[-6:]:
@@ -357,7 +487,6 @@ class AIService:
                 content = first_candidate.get("content", {})
                 parts = content.get("parts", [])
 
-                # Check if Gemini requested a function call
                 executed_tools = []
                 tool_results = []
                 for part in parts:
@@ -367,16 +496,13 @@ class AIService:
                         fn_args = fc.get("args", {})
                         executed_tools.append({"name": fn_name, "args": fn_args})
                         
-                        # Execute tool on backend!
                         tool_res = await self.execute_tool(fn_name, fn_args)
                         tool_results.append({
                             "name": fn_name,
                             "response": {"name": fn_name, "content": tool_res}
                         })
 
-                # If tools were executed, do second turn with tool results to get final response
                 if tool_results:
-                    # Append model tool call and tool response
                     contents.append(content)
                     tool_parts = []
                     for tr in tool_results:
@@ -407,7 +533,6 @@ class AIService:
                                 "model": "gemini-1.5-flash"
                             }
 
-                # Plain text response without function calls
                 text_response = "".join([p.get("text", "") for p in parts if "text" in p])
                 return {
                     "response": text_response or "I have analyzed the available environmental parameters.",

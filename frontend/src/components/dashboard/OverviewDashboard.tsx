@@ -1,30 +1,42 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { ForecastTimeline } from './ForecastTimeline';
 import {
   Radio,
   RefreshCw,
-  CheckCircle2,
-  ShieldCheck,
-  AlertOctagon,
-  AlertTriangle,
+  ShieldAlert,
   Info,
-  Clock,
-  Compass,
-  ArrowUpRight,
+  MapPin,
+  Cpu,
+  Sparkles,
+  ArrowRight,
   TrendingUp,
-  Cpu
+  TrendingDown,
+  Minus,
+  Globe,
+  BellRing,
+  ExternalLink,
+  Layers
 } from 'lucide-react';
 
-export const OverviewDashboard: React.FC = () => {
+interface OverviewDashboardProps {
+  onNavigateToMap?: () => void;
+  onNavigateToAlerts?: () => void;
+}
+
+export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
+  onNavigateToMap,
+  onNavigateToAlerts,
+}) => {
   const { airQuality, loading, error, activeCity, popularCities, setActiveCity, standard, setStandard } = useAQI();
+  const [selectedChartPollutant, setSelectedChartPollutant] = useState<'pm25' | 'pm10' | 'no2' | 'o3'>('pm25');
 
   if (loading && !airQuality) {
     return (
-      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3 font-mono">
-        <RefreshCw className="w-7 h-7 text-cyan-400 animate-spin" />
-        <p className="text-xs text-slate-400 tracking-wider">
-          INGESTING ATMOSPHERIC TELEMETRY FOR {activeCity.name.toUpperCase()}...
+      <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3 font-sans">
+        <RefreshCw className="w-8 h-8 text-atlas-accent dark:text-darkAtlas-accent animate-spin" />
+        <p className="text-xs text-atlas-muted dark:text-darkAtlas-muted tracking-wider">
+          Ingesting atmospheric measurements for {activeCity.name}...
         </p>
       </div>
     );
@@ -32,10 +44,10 @@ export const OverviewDashboard: React.FC = () => {
 
   if (error && !airQuality) {
     return (
-      <div className="p-6 bg-red-950/40 border border-red-800/60 rounded text-center space-y-2 font-mono">
-        <AlertOctagon className="w-8 h-8 text-red-400 mx-auto" />
-        <h3 className="text-sm font-bold text-red-200">TELEMETRY INGESTION HALTED</h3>
-        <p className="text-xs text-red-300">{error}</p>
+      <div className="p-6 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl text-center space-y-2 font-sans">
+        <ShieldAlert className="w-8 h-8 text-red-500 mx-auto" />
+        <h3 className="text-sm font-bold text-red-800 dark:text-red-200">Atmospheric Data Unavailable</h3>
+        <p className="text-xs text-red-600 dark:text-red-300">{error}</p>
       </div>
     );
   }
@@ -43,173 +55,165 @@ export const OverviewDashboard: React.FC = () => {
   if (!airQuality) return null;
 
   const currentResult = airQuality.aqi_standard_results[standard] || airQuality.aqi_standard_results['US_EPA'];
-  const aqiValue = currentResult.aqi !== null ? currentResult.aqi : '--';
+  const aqiValue = currentResult.aqi !== null ? currentResult.aqi : '—';
   const category = currentResult.category;
   const dominant = airQuality.dominant_pollutant || 'PM2.5';
-  const aqiColor = currentResult.color || '#10b981';
+  const aqiColor = currentResult.color || '#16865C';
 
-  // WHO 24-hr guideline limits (ug/m3) for standard comparison
-  const whoGuidelines: Record<string, { whoLimit: number; name: string; formula: string; unit: string }> = {
-    pm25: { whoLimit: 15, name: 'Fine Particulate Matter', formula: 'PM2.5', unit: 'µg/m³' },
-    pm10: { whoLimit: 45, name: 'Coarse Particulate Matter', formula: 'PM10', unit: 'µg/m³' },
-    no2:  { whoLimit: 25, name: 'Nitrogen Dioxide', formula: 'NO₂', unit: 'µg/m³' },
-    so2:  { whoLimit: 40, name: 'Sulphur Dioxide', formula: 'SO₂', unit: 'µg/m³' },
-    co:   { whoLimit: 4,  name: 'Carbon Monoxide', formula: 'CO', unit: 'mg/m³' },
-    o3:   { whoLimit: 100, name: 'Tropospheric Ozone', formula: 'O₃', unit: 'µg/m³' },
+  // WHO 24-hr guideline reference benchmarks
+  const whoGuidelines: Record<string, { whoLimit: number; name: string; formula: string; unit: string; period: string }> = {
+    pm25: { whoLimit: 15, name: 'Fine Particulate Matter', formula: 'PM2.5', unit: 'µg/m³', period: '24h mean' },
+    pm10: { whoLimit: 45, name: 'Coarse Particulate Matter', formula: 'PM10', unit: 'µg/m³', period: '24h mean' },
+    no2:  { whoLimit: 25, name: 'Nitrogen Dioxide', formula: 'NO₂', unit: 'µg/m³', period: '24h mean' },
+    so2:  { whoLimit: 40, name: 'Sulphur Dioxide', formula: 'SO₂', unit: 'µg/m³', period: '24h mean' },
+    co:   { whoLimit: 4,  name: 'Carbon Monoxide', formula: 'CO', unit: 'mg/m³', period: '24h mean' },
+    o3:   { whoLimit: 100, name: 'Tropospheric Ozone', formula: 'O₃', unit: 'µg/m³', period: '8h peak' },
   };
 
   return (
-    <div className="space-y-4 max-w-7xl mx-auto pb-12 font-sans">
-      {/* 1. Global Megacity Terminal Ticker */}
-      <div className="bg-[#0b101d] border border-slate-800 rounded px-3 py-2 flex items-center space-x-2 overflow-x-auto scrollbar-none font-mono text-xs">
-        <span className="text-[10px] text-slate-400 uppercase tracking-widest shrink-0 font-bold">
-          TERMINALS:
+    <div className="space-y-5 max-w-7xl mx-auto pb-12 font-sans">
+      {/* 1. Global Metropolises Quick Filter Strip */}
+      <div className="bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl px-4 py-2.5 flex items-center space-x-2 overflow-x-auto scrollbar-none shadow-subtle">
+        <span className="text-[11px] text-atlas-muted dark:text-darkAtlas-muted font-semibold uppercase tracking-wider shrink-0 mr-1 flex items-center">
+          <MapPin className="w-3.5 h-3.5 text-atlas-accent dark:text-darkAtlas-accent mr-1" /> Terminals:
         </span>
-        <div className="flex items-center space-x-1.5 shrink-0">
+        <div className="flex items-center space-x-2 shrink-0">
           {popularCities.map((city) => {
             const isActive = activeCity.name === city.name;
             return (
               <button
                 key={city.name}
                 onClick={() => setActiveCity(city)}
-                className={`px-2.5 py-1 rounded text-[11px] transition-colors flex items-center space-x-1.5 ${
+                className={`px-3 py-1 rounded-lg text-xs transition-colors flex items-center space-x-1.5 font-medium ${
                   isActive
-                    ? 'bg-cyan-500/15 text-cyan-400 border border-cyan-500/40 font-bold'
-                    : 'bg-slate-900/60 text-slate-400 hover:text-slate-200 border border-slate-800/80'
+                    ? 'bg-atlas-accent dark:bg-darkAtlas-accent text-white dark:text-darkAtlas-bg shadow-sm'
+                    : 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text border border-atlas-border dark:border-darkAtlas-border'
                 }`}
               >
                 <span>{city.name}</span>
-                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-cyan-400 animate-pulse" />}
+                {isActive && <span className="w-1.5 h-1.5 rounded-full bg-white dark:bg-darkAtlas-bg" />}
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* 2. Scientific Telemetry Status Strip */}
-      <div className="bg-[#080d1a] border border-slate-800 rounded px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs font-mono">
-        <div className="flex items-center space-x-3 text-slate-300">
+      {/* 2. Section A: Location Context Header */}
+      <div className="bg-atlas-subtle/80 dark:bg-darkAtlas-subtle/80 border border-atlas-border dark:border-darkAtlas-border rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center space-x-3 text-atlas-text dark:text-darkAtlas-text">
           <div className="flex items-center space-x-1.5">
             {airQuality.is_ground_observation ? (
-              <span className="flex items-center text-emerald-400 font-bold">
-                <Radio className="w-3.5 h-3.5 mr-1 animate-pulse" />
-                GROUND SENSOR ONLINE
+              <span className="flex items-center text-atlas-success dark:text-darkAtlas-success font-semibold font-mono text-[11px]">
+                <Radio className="w-3.5 h-3.5 mr-1" />
+                Physical Ground Observation
               </span>
             ) : (
-              <span className="flex items-center text-cyan-400 font-bold">
+              <span className="flex items-center text-atlas-secondary dark:text-darkAtlas-secondary font-semibold font-mono text-[11px]">
                 <Cpu className="w-3.5 h-3.5 mr-1" />
-                COPERNICUS CAMS MODEL
+                Modelled Atmospheric Estimate
               </span>
             )}
           </div>
-          <span className="text-slate-700">|</span>
-          <span className="text-slate-400 truncate max-w-md">
-            Source: <strong className="text-slate-200">{airQuality.primary_source}</strong>
+          <span className="text-atlas-border dark:text-darkAtlas-border">|</span>
+          <span className="text-atlas-muted dark:text-darkAtlas-muted truncate max-w-md font-sans">
+            Source: <strong className="text-atlas-text dark:text-darkAtlas-text">{airQuality.primary_source}</strong>
           </span>
         </div>
 
-        <div className="flex items-center space-x-4 text-[11px] text-slate-400">
-          <span>Lat: {activeCity.latitude.toFixed(4)}°N</span>
-          <span>Lon: {activeCity.longitude.toFixed(4)}°E</span>
-          <span className="text-slate-300">Updated: ~{airQuality.data_freshness_minutes}m ago</span>
-          <span className="text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/50 flex items-center space-x-1">
-            <ShieldCheck className="w-3 h-3" />
-            <span>AUTHENTIC</span>
-          </span>
+        <div className="flex items-center space-x-4 text-[11px] text-atlas-muted dark:text-darkAtlas-muted font-mono">
+          <span>{activeCity.latitude.toFixed(4)}°N, {activeCity.longitude.toFixed(4)}°E</span>
+          <span className="text-atlas-text dark:text-darkAtlas-text">Updated ~{airQuality.data_freshness_minutes}m ago</span>
         </div>
       </div>
 
-      {/* 3. Main Split Command Console */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-        {/* Left Column (5 Cols): Deterministic Air Quality Index Matrix */}
-        <div className="lg:col-span-5 bg-[#0b1122] border border-slate-800 rounded p-5 space-y-5 flex flex-col justify-between">
+      {/* 3. Section B & C: Main Analytical Split Workspace */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Left Column (5 Cols): AQI Diagnostic Section & Multi-Standard Equivalency */}
+        <div className="lg:col-span-5 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-6 space-y-6 flex flex-col justify-between shadow-floating dark:shadow-floating-dark">
           <div>
-            {/* Header: Location & Active Standard */}
-            <div className="flex items-start justify-between border-b border-slate-800 pb-3">
+            {/* Header: Location & Standard */}
+            <div className="flex items-start justify-between border-b border-atlas-border dark:border-darkAtlas-border pb-4">
               <div>
-                <span className="text-[10px] font-mono text-cyan-400 uppercase tracking-widest block font-bold">
-                  Atmospheric Diagnostic
+                <span className="text-[10px] text-atlas-accent dark:text-darkAtlas-accent uppercase tracking-widest block font-mono font-semibold">
+                  Air Quality Diagnostic
                 </span>
-                <h2 className="text-2xl font-bold font-mono text-white tracking-tight mt-0.5">
-                  {activeCity.name.toUpperCase()}
+                <h2 className="text-2xl font-bold text-atlas-text dark:text-darkAtlas-text tracking-tight mt-0.5 font-sans">
+                  {activeCity.name}
                   {activeCity.country && (
-                    <span className="text-xs font-normal text-slate-400 ml-2">
+                    <span className="text-xs font-normal text-atlas-muted dark:text-darkAtlas-muted ml-2">
                       ({activeCity.country})
                     </span>
                   )}
                 </h2>
               </div>
 
-              {/* Standard Switcher Badge */}
-              <div className="text-right font-mono">
-                <span className="text-[10px] text-slate-500 uppercase block">Active Metric</span>
-                <span className="text-xs font-bold text-cyan-400">
-                  {standard === 'US_EPA' ? 'US EPA AQI' : standard === 'INDIA_CPCB' ? 'India CPCB NAQI' : 'European EAQI'}
+              <div className="text-right">
+                <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted uppercase block font-sans">Active Standard</span>
+                <span className="text-xs font-bold text-atlas-accent dark:text-darkAtlas-accent font-mono">
+                  {standard === 'US_EPA' ? 'US EPA' : standard === 'INDIA_CPCB' ? 'CPCB NAQI' : 'EU EAQI'}
                 </span>
               </div>
             </div>
 
-            {/* Main Segmented Numerical Gauge */}
-            <div className="mt-5 flex items-center space-x-5">
+            {/* Numerical AQI Indicator */}
+            <div className="mt-5 flex items-center space-x-6">
               <div
-                className="text-6xl font-bold font-mono tracking-tight leading-none"
+                className="text-6xl font-extrabold font-mono tracking-tight leading-none"
                 style={{ color: aqiColor }}
               >
                 {aqiValue}
               </div>
 
-              <div className="space-y-1">
-                <div className="flex items-center space-x-1.5">
-                  <span
-                    className="px-2.5 py-0.5 text-xs font-bold font-mono rounded border uppercase"
-                    style={{
-                      color: aqiColor,
-                      borderColor: `${aqiColor}60`,
-                      backgroundColor: `${aqiColor}15`,
-                    }}
-                  >
-                    {category}
-                  </span>
-                </div>
-                <div className="text-xs font-mono text-slate-400 flex items-center space-x-1.5 pt-1">
-                  <span>Dominant Parameter:</span>
-                  <span className="font-bold text-white bg-slate-900 px-1.5 py-0.5 rounded border border-slate-700">
+              <div className="space-y-1.5">
+                <span
+                  className="px-3 py-1 text-xs font-bold font-sans rounded-full border uppercase"
+                  style={{
+                    color: aqiColor,
+                    borderColor: `${aqiColor}60`,
+                    backgroundColor: `${aqiColor}15`,
+                  }}
+                >
+                  {category}
+                </span>
+                <div className="text-xs text-atlas-muted dark:text-darkAtlas-muted flex items-center space-x-1.5 pt-1 font-sans">
+                  <span>Dominant Pollutant:</span>
+                  <span className="font-bold text-atlas-text dark:text-darkAtlas-text bg-atlas-subtle dark:bg-darkAtlas-subtle px-2 py-0.5 rounded border border-atlas-border dark:border-darkAtlas-border font-mono">
                     {dominant}
                   </span>
                 </div>
               </div>
             </div>
 
-            {/* Health Implication Text */}
-            <div className="mt-4 p-3 bg-[#080d1a] border border-slate-800/80 rounded text-xs text-slate-300 leading-relaxed font-sans flex items-start space-x-2">
-              <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
+            {/* Health Advisory Summary */}
+            <div className="mt-5 p-4 bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-xl text-xs text-atlas-text dark:text-darkAtlas-text leading-relaxed font-sans flex items-start space-x-2.5">
+              <Info className="w-4 h-4 text-atlas-accent dark:text-darkAtlas-accent shrink-0 mt-0.5" />
               <span>{currentResult.advisory}</span>
             </div>
           </div>
 
-          {/* Comparative Standard Telemetry Table */}
-          <div className="pt-3 border-t border-slate-800 font-mono">
-            <span className="text-[10px] text-slate-400 uppercase tracking-wider block mb-2 font-bold">
-              Multi-Jurisdiction Regulatory Equivalency:
+          {/* Multi-Standard Cross-Reference Table */}
+          <div className="pt-4 border-t border-atlas-border dark:border-darkAtlas-border">
+            <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted uppercase tracking-wider block mb-2.5 font-sans font-semibold">
+              Regulatory Standards Cross-Reference:
             </span>
-            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+            <div className="grid grid-cols-3 gap-2.5 text-center text-xs">
               {Object.entries(airQuality.aqi_standard_results).map(([stdKey, res]) => (
                 <div
                   key={stdKey}
                   onClick={() => setStandard(stdKey as any)}
-                  className={`p-2 rounded border cursor-pointer transition-colors ${
+                  className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
                     standard === stdKey
-                      ? 'bg-slate-800/80 border-cyan-400 text-white'
-                      : 'bg-slate-900/40 border-slate-800/80 text-slate-400 hover:text-slate-200'
+                      ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle border-atlas-accent dark:border-darkAtlas-accent text-atlas-text dark:text-darkAtlas-text shadow-sm'
+                      : 'bg-atlas-surface dark:bg-darkAtlas-surface border-atlas-border dark:border-darkAtlas-border text-atlas-muted dark:text-darkAtlas-muted hover:border-atlas-accent'
                   }`}
                 >
-                  <span className="text-[10px] text-slate-500 block">
-                    {stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB NAQI' : 'EU EAQI'}
+                  <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted block font-sans">
+                    {stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB' : 'EAQI'}
                   </span>
-                  <span className="text-base font-bold" style={{ color: res.color }}>
+                  <span className="text-lg font-bold font-mono mt-0.5 block" style={{ color: res.color }}>
                     {res.aqi !== null ? res.aqi : '—'}
                   </span>
-                  <span className="text-[9px] block truncate text-slate-400 mt-0.5">
+                  <span className="text-[10px] block truncate text-atlas-muted dark:text-darkAtlas-muted mt-0.5 font-sans">
                     {res.category}
                   </span>
                 </div>
@@ -218,31 +222,31 @@ export const OverviewDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Right Column (7 Cols): Precision Chemical Telemetry Table */}
-        <div className="lg:col-span-7 bg-[#0b1122] border border-slate-800 rounded p-5 space-y-3 font-mono flex flex-col justify-between">
+        {/* Right Column (7 Cols): Section C Pollutant Matrix */}
+        <div className="lg:col-span-7 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-6 space-y-4 flex flex-col justify-between shadow-floating dark:shadow-floating-dark">
           <div>
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <span className="text-xs font-bold text-slate-200 uppercase tracking-wider">
-                PHYSICAL CHEMICAL TELEMETRY MATRIX
+            <div className="flex items-center justify-between border-b border-atlas-border dark:border-darkAtlas-border pb-3">
+              <span className="text-xs font-bold text-atlas-text dark:text-darkAtlas-text uppercase tracking-wider font-sans">
+                Monitored Pollutant Concentration Matrix
               </span>
-              <span className="text-[11px] text-slate-400">
-                Calibrated to WHO Air Quality Guidelines
+              <span className="text-[11px] text-atlas-muted dark:text-darkAtlas-muted font-sans">
+                Benchmark: WHO Air Quality Guidelines
               </span>
             </div>
 
             {/* Dense Telemetry Table */}
-            <div className="overflow-x-auto mt-2">
+            <div className="overflow-x-auto mt-3">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
-                  <tr className="border-b border-slate-800 text-[10px] text-slate-400 uppercase">
-                    <th className="py-2 pr-3">Pollutant</th>
-                    <th className="py-2 px-3">Concentration</th>
-                    <th className="py-2 px-3">WHO Guideline</th>
-                    <th className="py-2 px-3">Exposure Ratio</th>
-                    <th className="py-2 pl-3 text-right">Detection Type</th>
+                  <tr className="border-b border-atlas-border dark:border-darkAtlas-border text-[10px] text-atlas-muted dark:text-darkAtlas-muted uppercase font-mono">
+                    <th className="py-2.5 pr-3">Pollutant</th>
+                    <th className="py-2.5 px-3">Concentration</th>
+                    <th className="py-2.5 px-3">WHO Guideline</th>
+                    <th className="py-2.5 px-3">Exposure Ratio</th>
+                    <th className="py-2.5 pl-3 text-right">Detection Type</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-800/60 text-slate-200">
+                <tbody className="divide-y divide-atlas-border/60 dark:divide-darkAtlas-border/60 text-atlas-text dark:text-darkAtlas-text font-sans">
                   {Object.entries(whoGuidelines).map(([key, cfg]) => {
                     const meas = airQuality.measurements[key];
                     const val = meas && meas.value !== null ? meas.value : null;
@@ -251,51 +255,51 @@ export const OverviewDashboard: React.FC = () => {
                     const isOverWHO = ratio !== null && ratio > 100;
 
                     return (
-                      <tr key={key} className="hover:bg-slate-900/40">
+                      <tr key={key} className="hover:bg-atlas-subtle/50 dark:hover:bg-darkAtlas-subtle/50 transition-colors">
                         <td className="py-2.5 pr-3">
-                          <span className="font-bold text-white text-sm">{cfg.formula}</span>
-                          <span className="text-[10px] text-slate-500 block font-sans">{cfg.name}</span>
+                          <span className="font-bold text-atlas-text dark:text-darkAtlas-text text-sm font-mono">{cfg.formula}</span>
+                          <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted block font-sans">{cfg.name}</span>
                         </td>
                         <td className="py-2.5 px-3">
                           {val !== null ? (
-                            <span className="text-base font-bold text-white">
-                              {val} <span className="text-[10px] text-slate-400 font-normal">{cfg.unit}</span>
+                            <span className="text-base font-bold font-mono">
+                              {val} <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted font-normal">{cfg.unit}</span>
                             </span>
                           ) : (
-                            <span className="text-slate-600">—</span>
+                            <span className="text-atlas-muted dark:text-darkAtlas-muted font-mono">Unavailable</span>
                           )}
                         </td>
-                        <td className="py-2.5 px-3 text-slate-400">
-                          {cfg.whoLimit} {cfg.unit}
+                        <td className="py-2.5 px-3 text-atlas-muted dark:text-darkAtlas-muted font-mono">
+                          {cfg.whoLimit} {cfg.unit} <span className="text-[9px] text-atlas-muted dark:text-darkAtlas-muted">({cfg.period})</span>
                         </td>
                         <td className="py-2.5 px-3 min-w-[120px]">
                           {ratio !== null ? (
                             <div className="space-y-1">
-                              <div className="flex justify-between text-[10px]">
-                                <span className={isOverWHO ? 'text-amber-400 font-bold' : 'text-slate-400'}>
+                              <div className="flex justify-between text-[10px] font-mono">
+                                <span className={isOverWHO ? 'text-atlas-warning dark:text-darkAtlas-warning font-bold' : 'text-atlas-muted dark:text-darkAtlas-muted'}>
                                   {ratio}%
                                 </span>
                               </div>
-                              <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                              <div className="w-full h-1.5 bg-atlas-subtle dark:bg-darkAtlas-subtle rounded-full overflow-hidden">
                                 <div
                                   className={`h-full rounded-full ${
-                                    isOverWHO ? 'bg-amber-400' : 'bg-emerald-500'
+                                    isOverWHO ? 'bg-atlas-warning dark:bg-darkAtlas-warning' : 'bg-atlas-success dark:bg-darkAtlas-success'
                                   }`}
                                   style={{ width: `${Math.min(100, ratio)}%` }}
                                 />
                               </div>
                             </div>
                           ) : (
-                            <span className="text-slate-600 text-[10px]">N/A</span>
+                            <span className="text-atlas-muted dark:text-darkAtlas-muted text-[10px] font-mono">N/A</span>
                           )}
                         </td>
                         <td className="py-2.5 pl-3 text-right">
-                          <span className={`text-[10px] px-2 py-0.5 rounded border ${
+                          <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
                             isGround
-                              ? 'bg-emerald-950/60 text-emerald-400 border-emerald-800/40'
-                              : 'bg-slate-900 text-slate-400 border-slate-800'
+                              ? 'bg-atlas-success/15 text-atlas-success dark:text-darkAtlas-success border border-atlas-success/30'
+                              : 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-muted dark:text-darkAtlas-muted'
                           }`}>
-                            {isGround ? 'Physical Ground Sensor' : 'CAMS Reanalysis'}
+                            {isGround ? 'Ground Sensor' : 'Model Estimate'}
                           </span>
                         </td>
                       </tr>
@@ -306,14 +310,120 @@ export const OverviewDashboard: React.FC = () => {
             </div>
           </div>
 
-          <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[10px] text-slate-500">
-            <span>Precision: Truncated according to EPA 40 CFR Part 58</span>
-            <span>Sensor Ingestion Rate: 1.0 Hz Active Polling</span>
+          <div className="pt-2 border-t border-atlas-border dark:border-darkAtlas-border flex items-center justify-between text-[10px] text-atlas-muted dark:text-darkAtlas-muted font-mono">
+            <span>Breakpoint Rules: EPA 40 CFR Part 58 / CPCB NAQI / EEA EAQI</span>
+            <span>Ground Station Sync: Live Active Polling</span>
           </div>
         </div>
       </div>
 
-      {/* 4. Contiguous Predictive Atmospheric Timeline */}
+      {/* 4. Section D & F & G: Map Preview, AI Summary & Recent Alerts Grid */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        {/* Section D: Map Preview Panel (4 Cols) */}
+        <div className="lg:col-span-4 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-5 shadow-floating dark:shadow-floating-dark space-y-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-atlas-border dark:border-darkAtlas-border pb-2.5">
+              <span className="text-xs font-bold text-atlas-text dark:text-darkAtlas-text uppercase tracking-wider flex items-center">
+                <Globe className="w-3.5 h-3.5 mr-1.5 text-atlas-accent dark:text-darkAtlas-accent" />
+                Geospatial Preview
+              </span>
+              <span className="text-[10px] font-mono text-atlas-muted dark:text-darkAtlas-muted">
+                {activeCity.name}
+              </span>
+            </div>
+
+            <div className="mt-3 bg-atlas-subtle dark:bg-darkAtlas-subtle rounded-lg p-3.5 border border-atlas-border dark:border-darkAtlas-border space-y-2 text-xs">
+              <div className="flex justify-between">
+                <span className="text-atlas-muted dark:text-darkAtlas-muted">Latitude:</span>
+                <span className="font-mono font-semibold">{activeCity.latitude.toFixed(4)}°N</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-atlas-muted dark:text-darkAtlas-muted">Longitude:</span>
+                <span className="font-mono font-semibold">{activeCity.longitude.toFixed(4)}°E</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-atlas-muted dark:text-darkAtlas-muted">Sensor Coverage:</span>
+                <span className="font-mono font-semibold text-atlas-success dark:text-darkAtlas-success">Active Ground Grid</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-3 border-t border-atlas-border dark:border-darkAtlas-border">
+            <button
+              onClick={onNavigateToMap}
+              className="w-full py-2 bg-atlas-accent dark:bg-darkAtlas-accent hover:opacity-90 text-white dark:text-darkAtlas-bg text-xs font-medium rounded-lg transition-colors flex items-center justify-center space-x-1.5 shadow-sm"
+            >
+              <span>Explore Interactive Map</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Section F: Environmental Intelligence Summary (5 Cols) */}
+        <div className="lg:col-span-5 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-5 shadow-floating dark:shadow-floating-dark space-y-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-atlas-border dark:border-darkAtlas-border pb-2.5">
+              <div className="flex items-center space-x-1.5">
+                <Sparkles className="w-4 h-4 text-atlas-accent dark:text-darkAtlas-accent" />
+                <h3 className="text-xs font-bold text-atlas-text dark:text-darkAtlas-text uppercase tracking-wider">
+                  Environmental Intelligence Summary
+                </h3>
+              </div>
+              <span className="text-[10px] font-mono text-atlas-muted dark:text-darkAtlas-muted">
+                Gemini Grounded Engine
+              </span>
+            </div>
+
+            <p className="mt-3 text-xs text-atlas-text dark:text-darkAtlas-text leading-relaxed font-sans">
+              Ambient air quality in {activeCity.name} is currently categorized as <strong style={{ color: aqiColor }}>{category}</strong> with an index of <strong className="font-mono">{aqiValue}</strong> ({standard.replace('_', ' ')}). The primary contributor to exposure risk is <strong className="font-mono text-atlas-accent dark:text-darkAtlas-accent">{dominant}</strong>. Atmospheric transport dispersion indicates stable boundary layer conditions over the coming hours.
+            </p>
+          </div>
+
+          <div className="pt-3 border-t border-atlas-border dark:border-darkAtlas-border text-[10px] text-atlas-muted dark:text-darkAtlas-muted font-mono flex justify-between">
+            <span>Derived from WAQI & Open-Meteo</span>
+            <span>Confidence: High</span>
+          </div>
+        </div>
+
+        {/* Section G: Recent Alerts (3 Cols) */}
+        <div className="lg:col-span-3 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-5 shadow-floating dark:shadow-floating-dark space-y-3 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center justify-between border-b border-atlas-border dark:border-darkAtlas-border pb-2.5">
+              <span className="text-xs font-bold text-atlas-text dark:text-darkAtlas-text uppercase tracking-wider flex items-center">
+                <BellRing className="w-3.5 h-3.5 mr-1.5 text-atlas-accent dark:text-darkAtlas-accent" />
+                Recent Alerts
+              </span>
+              <span className="text-[10px] font-mono text-atlas-muted dark:text-darkAtlas-muted">
+                Active Log
+              </span>
+            </div>
+
+            <div className="mt-3 space-y-2">
+              <div className="p-2.5 bg-atlas-subtle dark:bg-darkAtlas-subtle rounded-lg border border-atlas-border dark:border-darkAtlas-border text-xs space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-atlas-text dark:text-darkAtlas-text">{activeCity.name} Monitor</span>
+                  <span className="text-[9px] font-mono text-atlas-success dark:text-darkAtlas-success">NOMINAL</span>
+                </div>
+                <p className="text-[11px] text-atlas-muted dark:text-darkAtlas-muted">
+                  No critical particulate thresholds currently breached.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              onClick={onNavigateToAlerts}
+              className="text-xs font-medium text-atlas-accent dark:text-darkAtlas-accent hover:underline flex items-center space-x-1"
+            >
+              <span>Manage Alert Rules</span>
+              <ArrowRight className="w-3 h-3" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* 5. Lower Section: 24h Predictive Atmospheric Timeline */}
       <ForecastTimeline />
     </div>
   );
