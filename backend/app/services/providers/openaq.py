@@ -26,6 +26,9 @@ class OpenAQProvider(EnvironmentalProvider):
 
     async def find_nearby_stations(self, lat: float, lon: float, radius_meters: int = 50000, limit: int = 10) -> List[Dict[str, Any]]:
         """Finds physical ground monitoring stations around coordinates."""
+        if not self.api_key:
+            return []
+
         endpoint = f"{self.BASE_URL}/locations"
         params = {
             "coordinates": f"{lat},{lon}",

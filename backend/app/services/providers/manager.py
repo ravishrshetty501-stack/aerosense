@@ -3,6 +3,7 @@ from typing import Dict, Any, Optional, List
 from app.services.providers.base import NormalizedMeasurement, LocationInfo, AirQualityResponse
 from app.services.providers.open_meteo import open_meteo_provider
 from app.services.providers.openaq import openaq_provider
+from app.services.providers.waqi import waqi_provider
 from app.services.aqi.engine import aqi_engine
 
 class EnvironmentalDataManager:
@@ -29,8 +30,10 @@ class EnvironmentalDataManager:
         # Step 1: Query Open-Meteo for complete meteorological, hourly history, and forecast data
         meteo_data = await open_meteo_provider.get_current_air_quality(lat, lon, city_name)
         
-        # Step 2: Check OpenAQ for ground-level physical stations near coordinates
-        openaq_data = await openaq_provider.get_current_air_quality(lat, lon, city_name)
+        # Step 2: Check OpenAQ or WAQI for ground-level physical stations near coordinates
+        ground_data = await openaq_provider.get_current_air_quality(lat, lon, city_name)
+        if not ground_data:
+            ground_data = await waqi_provider.get_current_air_quality(lat, lon, city_name)
         
         is_ground = False
         primary_source = "Open-Meteo CAMS Ensemble (Model Current Estimate)"
@@ -40,11 +43,11 @@ class EnvironmentalDataManager:
         if meteo_data and "measurements" in meteo_data:
             merged_measurements.update(meteo_data["measurements"])
             
-        # If OpenAQ physical ground station is available, prioritize ground sensors!
-        if openaq_data and "measurements" in openaq_data and openaq_data["measurements"]:
+        # If physical ground station is available, prioritize ground sensors!
+        if ground_data and "measurements" in ground_data and ground_data["measurements"]:
             is_ground = True
-            primary_source = f"{openaq_data['source']} (Physical Ground Sensor)"
-            for p_key, ground_meas in openaq_data["measurements"].items():
+            primary_source = f"{ground_data['source']} (Physical Ground Sensor)"
+            for p_key, ground_meas in ground_data["measurements"].items():
                 merged_measurements[p_key] = ground_meas  # Ground observation overrides model estimate
                 
         # Calculate raw numeric dictionary for deterministic AQI calculations

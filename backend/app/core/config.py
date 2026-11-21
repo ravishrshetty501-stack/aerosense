@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     
     # External APIs
     OPENAQ_API_KEY: Optional[str] = os.getenv("OPENAQ_API_KEY", "")
+    WAQI_API_KEY: Optional[str] = os.getenv("WAQI_API_KEY", "")
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY", "")
     
     # CORS
@@ -35,7 +36,7 @@ class Settings(BaseSettings):
     
     model_config = SettingsConfigDict(
         case_sensitive=True,
-        env_file=".env",
+        env_file=("backend/.env", ".env"),
         extra="ignore"
     )
 

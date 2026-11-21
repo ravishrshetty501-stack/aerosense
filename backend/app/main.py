@@ -1,8 +1,10 @@
 import time
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import JSONResponse, FileResponse
 from app.core.config import settings
 from app.core.database import engine, Base
 
@@ -74,12 +76,27 @@ app.include_router(reports_router, prefix=settings.API_V1_STR)
 app.include_router(users_router, prefix=settings.API_V1_STR)
 app.include_router(system_router, prefix=settings.API_V1_STR)
 
-@app.get("/")
-async def root():
-    return {
-        "name": settings.PROJECT_NAME,
-        "version": settings.VERSION,
-        "status": "operational",
-        "docs": "/docs",
-        "health": f"{settings.API_V1_STR}/system/health"
-    }
+# Mount frontend/dist if available to serve SPA directly
+frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../frontend/dist"))
+if not os.path.exists(frontend_dist):
+    frontend_dist = os.path.abspath("frontend/dist")
+
+if os.path.exists(frontend_dist):
+    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_dist, "assets")), name="assets")
+
+    @app.api_route("/{full_path:path}", methods=["GET", "HEAD"])
+    async def serve_spa(full_path: str):
+        file_path = os.path.join(frontend_dist, full_path)
+        if full_path and os.path.exists(file_path) and os.path.isfile(file_path):
+            return FileResponse(file_path)
+        return FileResponse(os.path.join(frontend_dist, "index.html"))
+else:
+    @app.get("/")
+    async def root():
+        return {
+            "name": settings.PROJECT_NAME,
+            "version": settings.VERSION,
+            "status": "operational",
+            "docs": "/docs",
+            "health": f"{settings.API_V1_STR}/system/health"
+        }

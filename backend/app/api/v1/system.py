@@ -13,6 +13,7 @@ async def health_check():
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "providers": {
             "openaq_configured": bool(settings.OPENAQ_API_KEY),
+            "waqi_configured": bool(settings.WAQI_API_KEY),
             "open_meteo": "active",
             "gemini_ai_configured": bool(settings.GEMINI_API_KEY)
         },
