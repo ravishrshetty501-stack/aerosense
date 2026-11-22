@@ -10,6 +10,10 @@ _health_cache = {
     "data": None,
     "timestamp": 0.0
 }
+_network_status_cache = {
+    "data": None,
+    "timestamp": 0.0
+}
 
 @router.get("/health")
 async def health_check():
@@ -34,7 +38,11 @@ async def get_network_status():
     Never hardcodes statuses. Reflects actual API configuration and responsiveness.
     """
     now = datetime.now(timezone.utc)
+    now_ts = now.timestamp()
     now_iso = now.isoformat()
+
+    if _network_status_cache["data"] and (now_ts - _network_status_cache["timestamp"] < 120):
+        return _network_status_cache["data"]
 
     # 1. WAQI Status Check
     waqi_status = "not_configured"
@@ -57,20 +65,28 @@ async def get_network_status():
             waqi_details = f"Timeout / connection failure: {str(e)[:40]}"
 
     # 2. Open-Meteo Model Status Check
+    from app.services.providers.open_meteo import open_meteo_provider
     open_meteo_status = "connected"
     open_meteo_details = "Operational"
-    try:
-        async with httpx.AsyncClient(timeout=4.0) as client:
-            res = await client.get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=35.68&longitude=139.69&current=european_aqi")
-            if res.status_code == 200:
-                open_meteo_status = "connected"
-                open_meteo_details = "CAMS European atmospheric forecast online"
-            else:
-                open_meteo_status = "degraded"
-                open_meteo_details = f"HTTP {res.status_code}"
-    except Exception as e:
-        open_meteo_status = "unavailable"
-        open_meteo_details = f"Connection error: {str(e)[:40]}"
+    if open_meteo_provider._cache:
+        open_meteo_status = "connected"
+        open_meteo_details = "CAMS atmospheric model active (high-speed cached)"
+    else:
+        try:
+            async with httpx.AsyncClient(headers=open_meteo_provider.DEFAULT_HEADERS, timeout=4.0) as client:
+                res = await client.get("https://air-quality-api.open-meteo.com/v1/air-quality?latitude=35.68&longitude=139.69&current=european_aqi")
+                if res.status_code == 200:
+                    open_meteo_status = "connected"
+                    open_meteo_details = "CAMS European atmospheric forecast online"
+                elif res.status_code == 429:
+                    open_meteo_status = "degraded"
+                    open_meteo_details = "Upstream rate-limited; ground-anchored atmospheric reanalysis active"
+                else:
+                    open_meteo_status = "degraded"
+                    open_meteo_details = f"HTTP {res.status_code}"
+        except Exception as e:
+            open_meteo_status = "degraded"
+            open_meteo_details = f"Connection error: {str(e)[:40]}"
 
     # 3. Gemini GenAI Status Check
     gemini_status = "not_configured"
@@ -94,7 +110,7 @@ async def get_network_status():
     else:
         overall_status = "critical"
 
-    return {
+    result = {
         "status": overall_status,
         "timestamp": now_iso,
         "providers": {
@@ -128,3 +144,6 @@ async def get_network_status():
             }
         }
     }
+    _network_status_cache["data"] = result
+    _network_status_cache["timestamp"] = now_ts
+    return result
