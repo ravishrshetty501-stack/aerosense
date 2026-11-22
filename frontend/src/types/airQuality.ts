@@ -68,7 +68,8 @@ export interface MonitoringStation {
   longitude: number;
   country?: string;
   provider: string;
-  sensors?: any[];
+  aqi?: number | null;
+  sensors?: Array<Record<string, unknown>>;
   last_updated?: string;
   type: string;
 }

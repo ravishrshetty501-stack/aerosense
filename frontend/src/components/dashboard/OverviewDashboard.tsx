@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAQI } from '../../context/AQIContext';
+import { AQIStandard } from '../../types/airQuality';
 import { ForecastTimeline } from './ForecastTimeline';
 import {
   Radio,
@@ -127,7 +128,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       </div>
 
       {/* 3. Section B & C: Main Analytical Split Workspace */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5" role="region" aria-label="Air Quality Analytical Workspace" aria-live="polite">
         {/* Left Column (5 Cols): AQI Diagnostic Section & Multi-Standard Equivalency */}
         <div className="lg:col-span-5 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl p-6 space-y-6 flex flex-col justify-between shadow-floating dark:shadow-floating-dark">
           <div>
@@ -200,7 +201,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               {Object.entries(airQuality.aqi_standard_results).map(([stdKey, res]) => (
                 <div
                   key={stdKey}
-                  onClick={() => setStandard(stdKey as any)}
+                  onClick={() => setStandard(stdKey as AQIStandard)}
                   className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
                     standard === stdKey
                       ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle border-atlas-accent dark:border-darkAtlas-accent text-atlas-text dark:text-darkAtlas-text shadow-sm'

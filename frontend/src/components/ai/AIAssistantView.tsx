@@ -3,12 +3,27 @@ import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
 import { Bot, Send, User, Sparkles, CheckCircle2, ChevronDown, ChevronUp, Database, Compass, Clock, MapPin } from 'lucide-react';
 
+export interface ToolCall {
+  name: string;
+  args?: Record<string, unknown>;
+}
+
+export interface GroundingData {
+  city?: string;
+  aqi?: number;
+  category?: string;
+  dominant_pollutant?: string;
+  source?: string;
+  timestamp?: string;
+  [key: string]: unknown;
+}
+
 interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
-  toolCalls?: any[];
-  groundingData?: any;
+  toolCalls?: ToolCall[];
+  groundingData?: GroundingData;
   timestamp: string;
 }
 
@@ -80,11 +95,12 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
       };
 
       setMessages((prev) => [...prev, botMsg]);
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : (typeof e === 'string' ? e : 'Connection timeout');
       const errorMsg: ChatMessage = {
         id: (Date.now() + 1).toString(),
         role: 'assistant',
-        content: `I encountered a communication issue with the reasoning engine: ${e.message || 'Connection timeout'}. Please verify your network status.`,
+        content: `I encountered a communication issue with the reasoning engine: ${errMsg}. Please verify your network status.`,
         timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
       };
       setMessages((prev) => [...prev, errorMsg]);

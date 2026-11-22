@@ -53,8 +53,9 @@ export const AlertsView: React.FC = () => {
       });
       setShowAddModal(false);
       loadAlerts();
-    } catch (err: any) {
-      alert(err.message || 'Failed to create rule');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : (typeof err === 'string' ? err : 'Failed to create rule');
+      alert(errMsg);
     }
   };
 

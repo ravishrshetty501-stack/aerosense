@@ -77,7 +77,7 @@ async def get_network_status():
     gemini_details = "GEMINI_API_KEY missing - running grounded fallback engine"
     if settings.GEMINI_API_KEY:
         gemini_status = "connected"
-        gemini_details = "Gemini 1.5 Flash function calling enabled"
+        gemini_details = "Google Gemini Intelligence Engine (Dynamic Function Calling enabled)"
 
     # 4. OpenAQ Status Check
     openaq_status = "not_configured"

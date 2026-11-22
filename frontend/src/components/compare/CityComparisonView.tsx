@@ -36,7 +36,7 @@ export const CityComparisonView: React.FC = () => {
     try {
       const res = await api.compareCities(cities, standard);
       setComparisonData(res.comparison || []);
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       setErrorMsg('Failed to load comparison data. Please try again.');
     } finally {

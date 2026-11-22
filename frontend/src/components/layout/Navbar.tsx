@@ -17,12 +17,20 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 
+interface SearchLocationItem {
+  name: string;
+  country?: string;
+  latitude: number;
+  longitude: number;
+}
+
 export const Navbar: React.FC = () => {
   const { activeCity, setActiveCity, standard, setStandard, loading, refreshData } = useAQI();
   const { user, openAuthModal, logout } = useAuth();
   const { theme, setTheme, resolvedTheme } = useTheme();
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<any[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchLocationItem[]>([]);
+  const [selectedIndex, setSelectedIndex] = useState<number>(-1);
   const [isSearching, setIsSearching] = useState(false);
   const [showDropdown, setShowDropdown] = useState(false);
   const [showThemeMenu, setShowThemeMenu] = useState(false);
@@ -34,6 +42,7 @@ export const Navbar: React.FC = () => {
     function handleClickOutside(e: MouseEvent) {
       if (searchRef.current && !searchRef.current.contains(e.target as Node)) {
         setShowDropdown(false);
+        setSelectedIndex(-1);
       }
       if (themeRef.current && !themeRef.current.contains(e.target as Node)) {
         setShowThemeMenu(false);
@@ -45,6 +54,7 @@ export const Navbar: React.FC = () => {
 
   // Debounced search
   useEffect(() => {
+    setSelectedIndex(-1);
     if (searchQuery.trim().length < 2) {
       setSearchResults([]);
       return;
@@ -64,7 +74,7 @@ export const Navbar: React.FC = () => {
     return () => clearTimeout(timer);
   }, [searchQuery]);
 
-  const selectCity = (item: any) => {
+  const selectCity = (item: SearchLocationItem) => {
     setActiveCity({
       name: item.name,
       country: item.country,
@@ -72,7 +82,37 @@ export const Navbar: React.FC = () => {
       longitude: item.longitude,
     });
     setSearchQuery('');
+    setSearchResults([]);
     setShowDropdown(false);
+    setSelectedIndex(-1);
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (!showDropdown || searchResults.length === 0) {
+      if (e.key === 'ArrowDown' && searchResults.length > 0) {
+        setShowDropdown(true);
+        setSelectedIndex(0);
+        e.preventDefault();
+      }
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : 0));
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : searchResults.length - 1));
+    } else if (e.key === 'Enter') {
+      if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+        e.preventDefault();
+        selectCity(searchResults[selectedIndex]);
+      }
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      setShowDropdown(false);
+      setSelectedIndex(-1);
+    }
   };
 
   return (
@@ -113,10 +153,16 @@ export const Navbar: React.FC = () => {
           <Search className="w-3.5 h-3.5 text-atlas-muted dark:text-darkAtlas-muted absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
           <input
             type="text"
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={showDropdown && searchResults.length > 0}
+            aria-controls="city-search-results-list"
+            aria-activedescendant={selectedIndex >= 0 ? `city-option-${selectedIndex}` : undefined}
             placeholder="Search global city, coordinates or monitoring station..."
             aria-label="Search global city, coordinates or monitoring station"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
+            onKeyDown={handleKeyDown}
             onFocus={() => searchQuery.length >= 2 && setShowDropdown(true)}
             className="w-full bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-lg py-1.5 pl-8 pr-8 text-xs text-atlas-text dark:text-darkAtlas-text placeholder-atlas-muted dark:placeholder-darkAtlas-muted focus:outline-none focus:border-atlas-accent dark:focus:border-darkAtlas-accent focus-visible:ring-1 focus-visible:ring-atlas-accent transition-colors"
           />
@@ -125,6 +171,7 @@ export const Navbar: React.FC = () => {
               onClick={() => {
                 setSearchQuery('');
                 setSearchResults([]);
+                setSelectedIndex(-1);
               }}
               aria-label="Clear search query"
               className="absolute right-7 top-1/2 -translate-y-1/2 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text p-0.5 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
@@ -139,12 +186,25 @@ export const Navbar: React.FC = () => {
 
         {/* Autocomplete Dropdown */}
         {showDropdown && searchResults.length > 0 && (
-          <div className="absolute top-full left-0 right-0 mt-1 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-lg shadow-floating dark:shadow-floating-dark overflow-hidden z-50 py-1">
+          <div
+            id="city-search-results-list"
+            role="listbox"
+            aria-label="City search results"
+            className="absolute top-full left-0 right-0 mt-1 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-lg shadow-floating dark:shadow-floating-dark overflow-hidden z-50 py-1"
+          >
             {searchResults.map((item, idx) => (
-              <button
+              <div
                 key={idx}
+                id={`city-option-${idx}`}
+                role="option"
+                aria-selected={selectedIndex === idx}
                 onClick={() => selectCity(item)}
-                className="w-full px-3 py-2 text-left hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle flex items-center justify-between text-xs transition-colors"
+                onMouseEnter={() => setSelectedIndex(idx)}
+                className={`w-full px-3 py-2 text-left flex items-center justify-between text-xs transition-colors cursor-pointer select-none ${
+                  selectedIndex === idx
+                    ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle ring-1 ring-inset ring-atlas-accent/40 font-semibold text-atlas-text dark:text-darkAtlas-text'
+                    : 'hover:bg-atlas-subtle/60 dark:hover:bg-darkAtlas-subtle/60 text-atlas-text dark:text-darkAtlas-text'
+                }`}
               >
                 <div className="flex items-center space-x-1.5 truncate">
                   <MapPin className="w-3 h-3 text-atlas-muted dark:text-darkAtlas-muted shrink-0" />
@@ -158,7 +218,7 @@ export const Navbar: React.FC = () => {
                 <span className="text-[10px] font-mono text-atlas-muted dark:text-darkAtlas-muted shrink-0 ml-2">
                   {item.latitude.toFixed(2)}°, {item.longitude.toFixed(2)}°
                 </span>
-              </button>
+              </div>
             ))}
           </div>
         )}

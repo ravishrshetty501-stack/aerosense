@@ -23,8 +23,9 @@ export const AuthModal: React.FC = () => {
       } else {
         await login(email, password);
       }
-    } catch (err: any) {
-      setError(err.message || 'Authentication failed. Please verify credentials.');
+    } catch (err: unknown) {
+      const errMsg = err instanceof Error ? err.message : (typeof err === 'string' ? err : 'Authentication failed. Please verify credentials.');
+      setError(errMsg);
     } finally {
       setSubmitting(false);
     }

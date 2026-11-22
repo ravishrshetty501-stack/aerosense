@@ -3,6 +3,7 @@ import maplibregl from 'maplibre-gl';
 import { useAQI } from '../../context/AQIContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
+import { MonitoringStation } from '../../types/airQuality';
 import {
   Layers,
   MapPin,
@@ -29,6 +30,10 @@ import {
   Globe2
 } from 'lucide-react';
 
+type PollutantVariable = 'pm25' | 'pm10' | 'no2' | 'so2' | 'co' | 'o3';
+type AqiTier = 'all' | 'good' | 'moderate' | 'poor' | 'severe';
+type TemporalStep = 'hourly' | 'daily' | '72h';
+
 export const GlobalPollutionMap: React.FC = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -36,16 +41,16 @@ export const GlobalPollutionMap: React.FC = () => {
   const { theme, resolvedTheme } = useTheme();
 
   // Control panel states
-  const [selectedStation, setSelectedStation] = useState<any | null>(null);
-  const [nearbyStations, setNearbyStations] = useState<any[]>([]);
+  const [selectedStation, setSelectedStation] = useState<MonitoringStation | null>(null);
+  const [nearbyStations, setNearbyStations] = useState<MonitoringStation[]>([]);
   const [loadingStations, setLoadingStations] = useState<boolean>(false);
-  const [selectedVariable, setSelectedVariable] = useState<'pm25' | 'pm10' | 'no2' | 'so2' | 'co' | 'o3'>('pm25');
+  const [selectedVariable, setSelectedVariable] = useState<PollutantVariable>('pm25');
   const [activeDataset, setActiveDataset] = useState<'ground' | 'cams_model' | 'forecast'>('ground');
-  const [aqiTierFilter, setAqiTierFilter] = useState<'all' | 'good' | 'moderate' | 'poor' | 'severe'>('all');
+  const [aqiTierFilter, setAqiTierFilter] = useState<AqiTier>('all');
   const [bottomWorkspaceOpen, setBottomWorkspaceOpen] = useState<boolean>(true);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [timelineIndex, setTimelineIndex] = useState<number>(0);
-  const [temporalStep, setTemporalStep] = useState<'hourly' | 'daily' | '72h'>('hourly');
+  const [temporalStep, setTemporalStep] = useState<TemporalStep>('hourly');
   const [chartMode, setChartMode] = useState<'standardized' | 'absolute'>('standardized');
 
   // Map tile URLs based on current theme
@@ -142,13 +147,15 @@ export const GlobalPollutionMap: React.FC = () => {
 
   // Time scrubber autoplay
   useEffect(() => {
-    let interval: any = null;
+    let interval: ReturnType<typeof setInterval> | null = null;
     if (isPlaying) {
       interval = setInterval(() => {
         setTimelineIndex((prev) => (prev + 1) % 24);
       }, 1000);
     }
-    return () => clearInterval(interval);
+    return () => {
+      if (interval) clearInterval(interval);
+    };
   }, [isPlaying]);
 
   // Color helper for station pins based on CliMA Scope scientific scale
@@ -408,7 +415,7 @@ export const GlobalPollutionMap: React.FC = () => {
               return (
                 <button
                   key={v.id}
-                  onClick={() => setSelectedVariable(v.id as any)}
+                  onClick={() => setSelectedVariable(v.id as PollutantVariable)}
                   className={`py-1.5 px-2 rounded-md border text-left transition-all ${
                     isSelected
                       ? 'bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg border-clima-accent dark:border-darkClima-accent font-bold shadow-sm'
@@ -441,7 +448,7 @@ export const GlobalPollutionMap: React.FC = () => {
                 return (
                   <button
                     key={t.id}
-                    onClick={() => setAqiTierFilter(t.id as any)}
+                    onClick={() => setAqiTierFilter(t.id as AqiTier)}
                     className={`py-1 rounded border transition-colors ${
                       isActive
                         ? 'bg-clima-text dark:bg-darkClima-text text-clima-surface dark:text-darkClima-surface border-clima-text dark:border-darkClima-text font-bold'
@@ -592,7 +599,7 @@ export const GlobalPollutionMap: React.FC = () => {
                 <select
                   aria-label="Temporal Step Interval"
                   value={temporalStep}
-                  onChange={(e) => setTemporalStep(e.target.value as any)}
+                  onChange={(e) => setTemporalStep(e.target.value as TemporalStep)}
                   className="bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded px-1.5 py-0.5 text-[11px] text-clima-text dark:text-darkClima-text focus:outline-none"
                 >
                   <option value="hourly">Hourly</option>

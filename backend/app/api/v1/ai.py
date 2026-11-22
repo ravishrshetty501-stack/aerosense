@@ -22,7 +22,7 @@ async def chat_with_assistant(
         response=result.get("response", ""),
         tool_calls=result.get("tool_calls"),
         grounding_data=result.get("grounding_data"),
-        model=result.get("model", "gemini-1.5-flash")
+        model=result.get("model", "dynamic-fallback")
     )
 
 @router.post("/tool")

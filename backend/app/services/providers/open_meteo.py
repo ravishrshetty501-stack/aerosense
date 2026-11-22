@@ -1,7 +1,10 @@
+import logging
 import httpx
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from app.services.providers.base import EnvironmentalProvider, NormalizedMeasurement, LocationInfo
+
+logger = logging.getLogger(__name__)
 
 class OpenMeteoAirQualityProvider(EnvironmentalProvider):
     """
@@ -34,7 +37,7 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
                         })
                     return results
             except Exception as e:
-                print(f"[OpenMeteo] Geocoding lookup error: {e}")
+                logger.warning("[OpenMeteo] Geocoding lookup error: %s", e)
         return []
 
     async def get_current_air_quality(self, lat: float, lon: float, location_name: str = "") -> Optional[Dict[str, Any]]:
@@ -61,7 +64,7 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
             try:
                 resp = await client.get(self.BASE_URL, params=params)
                 if resp.status_code != 200:
-                    print(f"[OpenMeteo] API error: status {resp.status_code}")
+                    logger.warning("[OpenMeteo] API error: status %s", resp.status_code)
                     return None
                     
                 data = resp.json()
@@ -149,7 +152,7 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
                     "hourly_series": trend_records
                 }
             except Exception as e:
-                print(f"[OpenMeteo] Exception querying air quality: {e}")
+                logger.warning("[OpenMeteo] Exception querying air quality: %s", e)
                 return None
 
     async def get_hourly_trends(self, lat: float, lon: float, past_days: int = 2, forecast_days: int = 3) -> Optional[Dict[str, Any]]:

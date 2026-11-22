@@ -65,7 +65,7 @@ export const api = {
   },
 
   // AI Assistant
-  async sendChatMessage(message: string, locationHint: string, history?: any[]) {
+  async sendChatMessage(message: string, locationHint: string, history?: Array<{ role: string; content: string }>) {
     const res = await fetch(`${API_BASE}/ai/chat`, {
       method: 'POST',
       headers: getAuthHeaders(),

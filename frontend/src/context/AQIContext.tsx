@@ -61,9 +61,10 @@ export const AQIProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       setAirQuality(data);
       setLastUpdated(new Date());
-    } catch (e: any) {
+    } catch (e: unknown) {
+      const errMsg = e instanceof Error ? e.message : (typeof e === 'string' ? e : 'Failed to fetch environmental data');
       console.error('Error fetching air quality:', e);
-      setError(e.message || 'Failed to fetch environmental data');
+      setError(errMsg);
     } finally {
       setLoading(false);
     }

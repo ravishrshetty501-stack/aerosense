@@ -64,6 +64,40 @@ async def add_process_time_and_security_headers(request: Request, call_next):
     response.headers["X-XSS-Protection"] = "1; mode=block"
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     response.headers["Permissions-Policy"] = "geolocation=(self), camera=(), microphone=()"
+
+    # 1. Reverse-proxy-aware HSTS (production / HTTPS only, no includeSubDomains, no preload)
+    is_https = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
+    if is_https:
+        response.headers["Strict-Transport-Security"] = "max-age=31536000"
+
+    # 2. Context-aware Content-Security-Policy (CSP)
+    path = request.url.path
+    if path in ("/docs", "/redoc", "/openapi.json"):
+        # Swagger UI and OpenAPI documentation policy
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+            "img-src 'self' data: https://fastapi.tiangolo.com; "
+            "frame-ancestors 'none'"
+        )
+    elif path.startswith(settings.API_V1_STR) or path in ("/health", "/metrics", "/api/health"):
+        # Highly restrictive API policy for pure JSON/telemetry endpoints
+        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+    else:
+        # Fallback SPA and static asset delivery policy (no unsafe-eval)
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self'; "
+            "script-src 'self' 'unsafe-inline'; "
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://unpkg.com; "
+            "font-src 'self' data: https://fonts.gstatic.com; "
+            "img-src 'self' data: blob: https://server.arcgisonline.com https://unpkg.com; "
+            "connect-src 'self' https://server.arcgisonline.com https://air-quality-api.open-meteo.com https://api.waqi.info https://generativelanguage.googleapis.com; "
+            "worker-src 'self' blob:; "
+            "child-src 'self' blob:; "
+            "frame-ancestors 'none'"
+        )
+
     return response
 
 # Include API v1 Routers

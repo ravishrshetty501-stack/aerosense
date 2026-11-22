@@ -10,6 +10,7 @@ async def test_security_headers_enforced():
     """Verify that all defensive HTTP security headers are populated on responses."""
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # 1. API endpoint on HTTP (should NOT emit HSTS on local HTTP)
         resp = await client.get("/api/v1/system/health")
         assert resp.status_code == 200
         headers = resp.headers
@@ -18,6 +19,20 @@ async def test_security_headers_enforced():
         assert headers.get("x-xss-protection") == "1; mode=block"
         assert headers.get("referrer-policy") == "strict-origin-when-cross-origin"
         assert "geolocation" in headers.get("permissions-policy", "")
+        assert "default-src 'none'" in headers.get("content-security-policy", "")
+        assert "strict-transport-security" not in headers
+
+        # 2. API endpoint through HTTPS reverse-proxy (should emit production HSTS)
+        resp_https = await client.get("/api/v1/system/health", headers={"X-Forwarded-Proto": "https"})
+        assert resp_https.status_code == 200
+        assert resp_https.headers.get("strict-transport-security") == "max-age=31536000"
+
+        # 3. Swagger documentation endpoint (should emit Swagger UI specific CSP)
+        docs_resp = await client.get("/docs")
+        assert docs_resp.status_code == 200
+        docs_csp = docs_resp.headers.get("content-security-policy", "")
+        assert "cdn.jsdelivr.net" in docs_csp
+        assert "unsafe-eval" not in docs_csp
 
 @pytest.mark.asyncio
 async def test_unauthorized_endpoints_rejected():

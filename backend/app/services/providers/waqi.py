@@ -1,8 +1,11 @@
+import logging
 import httpx
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from app.core.config import settings
 from app.services.providers.base import EnvironmentalProvider, NormalizedMeasurement
+
+logger = logging.getLogger(__name__)
 
 class WAQIProvider(EnvironmentalProvider):
     """
@@ -65,7 +68,7 @@ class WAQIProvider(EnvironmentalProvider):
                             })
                         return stations
             except Exception as e:
-                print(f"[WAQI] Exception querying station bounds: {e}")
+                logger.warning("[WAQI] Exception querying station bounds: %s", e)
         return []
 
     async def get_current_air_quality(self, lat: float, lon: float, location_name: str = "") -> Optional[Dict[str, Any]]:
@@ -125,7 +128,7 @@ class WAQIProvider(EnvironmentalProvider):
                                 "is_ground_observation": True
                             }
             except Exception as e:
-                print(f"[WAQI] Exception querying air quality: {e}")
+                logger.warning("[WAQI] Exception querying air quality: %s", e)
         return None
 
     async def get_hourly_trends(self, lat: float, lon: float, past_days: int = 2, forecast_days: int = 3) -> Optional[Dict[str, Any]]:

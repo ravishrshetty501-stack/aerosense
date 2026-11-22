@@ -1,8 +1,11 @@
+import logging
 import httpx
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
 from app.core.config import settings
 from app.services.providers.base import EnvironmentalProvider, NormalizedMeasurement
+
+logger = logging.getLogger(__name__)
 
 class OpenAQProvider(EnvironmentalProvider):
     """
@@ -56,9 +59,9 @@ class OpenAQProvider(EnvironmentalProvider):
                         })
                     return stations
                 else:
-                    print(f"[OpenAQ] Locations lookup returned status {resp.status_code}")
+                    logger.warning("[OpenAQ] Locations lookup returned status %s", resp.status_code)
             except Exception as e:
-                print(f"[OpenAQ] Exception in find_nearby_stations: {e}")
+                logger.warning("[OpenAQ] Exception in find_nearby_stations: %s", e)
         return []
 
     async def get_current_air_quality(self, lat: float, lon: float, location_name: str = "") -> Optional[Dict[str, Any]]:
@@ -130,7 +133,7 @@ class OpenAQProvider(EnvironmentalProvider):
                             "is_ground_observation": True
                         }
             except Exception as e:
-                print(f"[OpenAQ] Latest measurements error: {e}")
+                logger.warning("[OpenAQ] Latest measurements error: %s", e)
                 
         return None
 

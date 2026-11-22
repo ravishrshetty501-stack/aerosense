@@ -1,8 +1,11 @@
+import logging
+import os
 from pathlib import Path
+from typing import List, Optional
 from pydantic import model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from typing import List, Optional
-import os
+
+logger = logging.getLogger(__name__)
 
 _THIS_DIR = Path(__file__).resolve().parent
 _BACKEND_DIR = _THIS_DIR.parent.parent  # backend/
@@ -26,8 +29,8 @@ def _resolve_database_url() -> str:
                 url = vals.get("DATABASE_URL")
                 if url and "postgres" in url.lower():
                     return url
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed checking %s for postgres DATABASE_URL: %s", p, e)
 
     # 3. Fallback to any defined DATABASE_URL in either file
     for p in [_BACKEND_DIR / ".env", _ROOT_DIR / ".env"]:
@@ -38,8 +41,8 @@ def _resolve_database_url() -> str:
                 url = vals.get("DATABASE_URL")
                 if url:
                     return url
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Failed checking %s for fallback DATABASE_URL: %s", p, e)
 
     return "sqlite+aiosqlite:///./aerosense.db"
 
@@ -54,6 +57,7 @@ def _resolve_cors_origins() -> List[str]:
         "http://127.0.0.1:3000",
         "https://aerosense-ai.vercel.app",
         "https://aerosense.onrender.com",
+        "https://aerosense-frontend.onrender.com",
     ]
     env_origins = os.getenv("BACKEND_CORS_ORIGINS") or os.getenv("CORS_ORIGINS")
     if env_origins:
@@ -67,8 +71,8 @@ def _resolve_cors_origins() -> List[str]:
                         if s and s not in defaults:
                             defaults.append(s)
                     return defaults
-        except Exception:
-            pass
+        except Exception as e:
+            logger.debug("Failed to parse JSON formatted CORS origins: %s", e)
         for item in env_origins.split(","):
             c = item.strip()
             if c and c not in defaults:

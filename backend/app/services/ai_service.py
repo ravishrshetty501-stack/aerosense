@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
@@ -8,6 +9,8 @@ from app.services.providers.manager import data_manager
 from app.services.providers.open_meteo import open_meteo_provider
 from app.services.providers.waqi import waqi_provider
 from app.services.alert_service import alert_service
+
+logger = logging.getLogger(__name__)
 
 SYSTEM_INSTRUCTION = """
 You are AeroSense AI, an authoritative, scientifically rigorous Global Urban Air Quality Intelligence and Environmental Health Assistant.
@@ -477,7 +480,7 @@ class AIService:
                 try:
                     resp = await client.post(endpoint, json=body)
                     if resp.status_code != 200:
-                        print(f"[Gemini {model_name}] Error status {resp.status_code}: {resp.text[:120]}")
+                        logger.warning("[Gemini %s] Error status %s: %s", model_name, resp.status_code, resp.text[:120])
                         continue
 
                     data = resp.json()
@@ -545,7 +548,7 @@ class AIService:
                         }
 
                 except Exception as ex:
-                    print(f"[Gemini {model_name}] Exception during API call: {ex}")
+                    logger.warning("[Gemini %s] Exception during API call: %s", model_name, ex)
                     continue
 
         return await self._deterministic_reasoning(clean_prompt, location_hint)
