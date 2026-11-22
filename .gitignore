@@ -29,3 +29,10 @@ frontend/.env.*
 .idea/
 .DS_Store
 Thumbs.db
+
+# Demo video intermediate build artifacts
+AeroSense_AI_Demo/raw_recordings/
+AeroSense_AI_Demo/processed_scenes/
+AeroSense_AI_Demo/audio/
+AeroSense_AI_Demo/test_audio.mp3
+

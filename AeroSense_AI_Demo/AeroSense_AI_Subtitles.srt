@@ -1,0 +1,71 @@
+1
+00:00:01,000 --> 00:00:07,500
+Air quality affects how we live, travel, and spend time outdoors.
+
+2
+00:00:07,800 --> 00:00:15,000
+But environmental readings alone do not always tell us what they mean or how we should respond. AeroSense AI brings air-quality intelligence, data, and AI interpretation together.
+
+3
+00:00:17,000 --> 00:00:23,500
+AeroSense AI provides a centralized view of available air-quality information.
+
+4
+00:00:24,000 --> 00:00:32,000
+Users can understand pollution levels, inspect pollutant readings, and examine monitoring data available for their selected location.
+
+5
+00:00:32,500 --> 00:00:41,000
+The platform makes data sources, timestamps, and WHO guideline ratios visible, helping users understand data freshness and reliability.
+
+6
+00:00:43,000 --> 00:00:51,500
+With the interactive global map, users can explore available monitoring stations geographically.
+
+7
+00:00:52,000 --> 00:01:06,500
+Selecting a physical ground station reveals verified readings, coordinates, and observation freshness, making it easy to understand spatial pollution patterns.
+
+8
+00:01:09,000 --> 00:01:16,000
+Beyond current readings, AeroSense AI helps users explore environmental trends.
+
+9
+00:01:16,500 --> 00:01:25,500
+Its analytics observatory provides continuous historical and forecast trajectories with deterministic surge detection,
+
+10
+00:01:26,000 --> 00:01:33,000
+while city comparison tools enable side-by-side benchmarking across global metropolitan areas.
+
+11
+00:01:35,000 --> 00:01:42,500
+The integrated Gemini-powered assistant adds contextual environmental intelligence.
+
+12
+00:01:43,000 --> 00:01:51,500
+Instead of simply displaying raw numbers, it interprets atmospheric conditions and delivers actionable activity guidance.
+
+13
+00:01:52,000 --> 00:02:02,500
+Every statement is strictly grounded in real telemetry retrieved through backend function calling, with zero hallucinated figures.
+
+14
+00:02:05,000 --> 00:02:11,500
+Additional capabilities turn environmental data into practical insights.
+
+15
+00:02:12,000 --> 00:02:20,000
+Users can consult evidence-based activity guidance, configure threshold-based pollution alerts, and access compliance reports,
+
+16
+00:02:20,500 --> 00:02:27,000
+and seamlessly toggle between scientific light and dark workstation themes.
+
+17
+00:02:29,000 --> 00:02:36,500
+AeroSense AI transforms complex environmental data into understandable atmospheric intelligence.
+
+18
+00:02:37,000 --> 00:02:44,500
+By combining physical ground monitoring with grounded AI interpretation, it empowers people to make better decisions about the air they breathe.

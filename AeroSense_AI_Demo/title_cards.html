@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AeroSense AI Title Cards</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 1920px;
+      height: 1080px;
+      background: #F4F7F4;
+      font-family: 'Inter', -apple-system, sans-serif;
+      color: #192923;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .card {
+      display: none;
+      width: 100%;
+      height: 100%;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 80px;
+      position: relative;
+    }
+    .card.active { display: flex; }
+    
+    /* Background subtle grid */
+    .bg-grid {
+      position: absolute;
+      inset: 0;
+      background-image: 
+        radial-gradient(circle at 50% 50%, rgba(8, 127, 115, 0.08) 0%, transparent 60%),
+        linear-gradient(to right, rgba(221, 230, 223, 0.4) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(221, 230, 223, 0.4) 1px, transparent 1px);
+      background-size: 100% 100%, 48px 48px, 48px 48px;
+      z-index: 0;
+    }
+
+    .content {
+      position: relative;
+      z-index: 10;
+      max-width: 1200px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 8px 18px;
+      background: #EBF1ED;
+      border: 1px solid #DDE6DF;
+      border-radius: 9999px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #087F73;
+      font-family: 'IBM Plex Mono', monospace;
+      letter-spacing: 0.05em;
+      margin-bottom: 28px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.03);
+    }
+
+    .logo-container {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+
+    .hex-icon {
+      width: 64px;
+      height: 64px;
+      background: #087F73;
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 32px;
+      font-family: 'IBM Plex Mono', monospace;
+      font-weight: 700;
+      box-shadow: 0 10px 25px rgba(8, 127, 115, 0.25);
+    }
+
+    h1 {
+      font-size: 72px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      color: #192923;
+      line-height: 1.1;
+    }
+    h1 span {
+      color: #087F73;
+    }
+
+    .tagline {
+      font-size: 26px;
+      font-weight: 500;
+      color: #69786F;
+      margin-top: 18px;
+      letter-spacing: -0.01em;
+    }
+
+    .tech-pill-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 48px;
+      flex-wrap: wrap;
+    }
+
+    .tech-pill {
+      background: #FFFFFF;
+      border: 1px solid #DDE6DF;
+      padding: 10px 20px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+      color: #192923;
+      font-family: 'IBM Plex Mono', monospace;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.04);
+    }
+    .tech-pill span {
+      color: #087F73;
+      margin-right: 6px;
+    }
+
+    /* Outro specific */
+    .outro h1 { font-size: 64px; }
+    .footer-note {
+      font-size: 16px;
+      color: #69786F;
+      margin-top: 54px;
+      font-family: 'IBM Plex Mono', monospace;
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+
+  <!-- INTRO CARD -->
+  <div id="intro-card" class="card active">
+    <div class="content">
+      <div class="badge">H2S HACK2SKILL CHALLENGE 6 &bull; URBAN AIR QUALITY ASSISTANT</div>
+      <div class="logo-container">
+        <div class="hex-icon">A</div>
+        <h1>AeroSense <span>AI</span></h1>
+      </div>
+      <p class="tagline">Global Urban Air Quality Intelligence Platform</p>
+      <div style="font-size: 20px; font-weight: 600; color: #087F73; margin-top: 14px; font-family: 'IBM Plex Mono', monospace;">
+        Understand the air &bull; Predict the risk &bull; Make better decisions
+      </div>
+
+      <div class="tech-pill-row">
+        <div class="tech-pill"><span>&bull;</span>WAQI Physical Ground Sensors</div>
+        <div class="tech-pill"><span>&bull;</span>Google Gemini 2.5 Flash</div>
+        <div class="tech-pill"><span>&bull;</span>Open-Meteo CAMS Model</div>
+        <div class="tech-pill"><span>&bull;</span>MapLibre GL GIS Canvas</div>
+        <div class="tech-pill"><span>&bull;</span>FastAPI + React 18</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- OUTRO CARD -->
+  <div id="outro-card" class="card">
+    <div class="content outro">
+      <div class="badge">SUBMISSION COMPLETED &bull; PRODUCTION READY</div>
+      <div class="logo-container">
+        <div class="hex-icon">A</div>
+        <h1>AeroSense <span>AI</span></h1>
+      </div>
+      <p class="tagline">Empowering cities and citizens with grounded atmospheric intelligence.</p>
+      
+      <div class="tech-pill-row">
+        <div class="tech-pill"><span>API</span> WAQI Official Feed (30,000+ Stations)</div>
+        <div class="tech-pill"><span>AI</span> Gemini Grounded Function Calling (8 Tools)</div>
+        <div class="tech-pill"><span>GIS</span> Esri World Gray Canvas</div>
+        <div class="tech-pill"><span>STD</span> US EPA &bull; CPCB NAQI &bull; EU EAQI</div>
+      </div>
+
+      <p class="footer-note">Hack2Skill Challenge 6: Urban Air Quality Assistant &bull; 2026</p>
+    </div>
+  </div>
+
+  <script>
+    function showCard(id) {
+      document.querySelectorAll('.card').forEach(c => c.classList.remove('active'));
+      document.getElementById(id).classList.add('active');
+    }
+  </script>
+</body>
+</html>
