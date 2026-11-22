@@ -6,7 +6,7 @@
 [![Live Application](https://img.shields.io/badge/Live_App-aerosense--frontend.onrender.com-009688?style=for-the-badge&logo=render&logoColor=white)](https://aerosense-frontend.onrender.com)
 [![Live Backend](https://img.shields.io/badge/Live_API-aerosense--backend.onrender.com-46E3B7?style=for-the-badge&logo=fastapi&logoColor=black)](https://aerosense-backend-3qqp.onrender.com)
 [![Demo Video](https://img.shields.io/badge/Demo_Video-YouTube_Walkthrough-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/LkMimoURokM)
-[![Tests Passing](https://img.shields.io/badge/Automated_Tests-39%2F39_Pytest_|_8%2F8_Vitest_Passed-18865B?style=for-the-badge)](https://docs.pytest.org)
+[![Tests Passing](https://img.shields.io/badge/Automated_Tests-59%2F59_Pytest_|_18%2F18_Vitest_Passed_(83.4%25_Coverage)-18865B?style=for-the-badge)](https://docs.pytest.org)
 [![Database](https://img.shields.io/badge/Database-Neon_Serverless_PostgreSQL_18-00E599?style=for-the-badge&logo=postgresql&logoColor=black)](https://neon.tech)
 [![AI Engine](https://img.shields.io/badge/AI_Engine-Google_Gemini_2.5_Flash-4285F4?style=for-the-badge&logo=google)](https://ai.google.dev)
 
@@ -502,8 +502,8 @@ All endpoints are versioned under `/api/v1`. Interactive Swagger UI is available
 | `POST` | `/api/v1/alerts/rules` | Create a new alert rule for a location and threshold. | **Bearer Token** |
 | `DELETE`| `/api/v1/alerts/rules/{id}` | Remove an existing alert rule. | **Bearer Token** |
 | `GET` | `/api/v1/alerts/events` | List triggered alert events and exceedance timestamps. | Public / User |
-| `POST` | `/api/v1/reports/generate` | Generate compliance report and save markdown briefing. | Optional / User |
-| `GET` | `/api/v1/reports/{id}/pdf` | Download verified vector PDF compiled with ReportLab. | Public / User |
+| `GET` | `/api/v1/reports/data` | Generate compliance report data and summary metrics. | Public / User |
+| `GET` | `/api/v1/reports/export/pdf` | Download verified vector PDF compiled with ReportLab. | Public / User |
 | `GET` | `/api/v1/users/saved-locations`| Fetch bookmarked analyst locations. | **Bearer Token** |
 | `POST` | `/api/v1/users/saved-locations`| Add a new bookmarked location. | **Bearer Token** |
 | `DELETE`| `/api/v1/users/saved-locations/{id}`| Remove a bookmarked location. | **Bearer Token** |
@@ -680,9 +680,9 @@ Render Free Web Services allocate **512 MB RAM**. To eliminate memory exhaustion
 
 ## 15. Automated Testing & Quality Assurance
 
-AeroSense AI maintains a comprehensive automated testing suite with **47 passing tests** across backend and frontend.
+AeroSense AI maintains a comprehensive automated testing suite with **77 passing tests** across backend and frontend.
 
-### 15.1 Backend Pytest Suite (39 Tests)
+### 15.1 Backend Pytest Suite (59 Tests)
 ```bash
 & "backend\venv\Scripts\python.exe" -m pytest backend/tests -v
 ```
@@ -693,21 +693,23 @@ platform win32 -- Python 3.11.9, pytest-9.2.0, pluggy-1.7.0
 rootdir: C:\Users\ravis\OneDrive\Desktop\Airsense ai
 configfile: pytest.ini
 plugins: anyio-4.16.0, asyncio-1.5.0, cov-7.1.0
-collected 39 items
+collected 59 items
 
-backend/tests/test_ai_tools.py ....                                      [ 10%]
-backend/tests/test_analytics_and_intelligence.py ...                     [ 17%]
-backend/tests/test_api_endpoints.py ....                                 [ 28%]
-backend/tests/test_aqi_engine.py ........                                [ 48%]
-backend/tests/test_database_neon.py ......                               [ 64%]
-backend/tests/test_fault_injection_and_edge_cases.py .....               [ 76%]
-backend/tests/test_providers.py ...                                      [ 84%]
+backend/tests/test_ai_tools.py ..........                                [ 16%]
+backend/tests/test_alert_service.py ...                                  [ 22%]
+backend/tests/test_analytics_and_intelligence.py ...                     [ 27%]
+backend/tests/test_api_endpoints.py ...........                          [ 45%]
+backend/tests/test_aqi_engine.py ........                                [ 59%]
+backend/tests/test_database_neon.py ......                               [ 69%]
+backend/tests/test_fault_injection_and_edge_cases.py .....               [ 77%]
+backend/tests/test_providers.py ...                                      [ 83%]
+backend/tests/test_report_service.py ....                                [ 89%]
 backend/tests/test_security_resilience.py ......                         [100%]
 
-======================== 39 passed in 74.23s (0:01:14) ========================
+======================= 59 passed in 176.86s (0:02:56) ========================
 ```
 
-### 15.2 Frontend Vitest Suite (8 Tests)
+### 15.2 Frontend Vitest Suite (18 Tests)
 ```bash
 cd frontend && npm test -- --run
 ```
@@ -715,19 +717,21 @@ cd frontend && npm test -- --run
 ```text
  RUN  v2.1.9 C:/Users/ravis/OneDrive/Desktop/Airsense ai/frontend
 
- ✓ src/tests/App.test.ts (3 tests) 3ms
  ✓ src/tests/aqi_intelligence.test.ts (5 tests) 3ms
+ ✓ src/tests/App.test.ts (6 tests) 4ms
+ ✓ src/tests/api.test.ts (7 tests) 8ms
 
- Test Files  2 passed (2)
-      Tests  8 passed (8)
-   Duration  1.42s
+ Test Files  3 passed (3)
+      Tests  18 passed (18)
+   Duration  917ms
 ```
 
 ### 15.3 Summary of Test Coverage
-- **Total Tests Executed:** 47
-- **Passed:** 47 (100%)
+- **Total Tests Executed:** 77
+- **Passed:** 77 (100%)
 - **Failed:** 0
 - **Skipped:** 0
+- **Backend Statement Coverage:** **83.4%** across 1,660 statements (`security.py`: 100%, `report_service.py`: 100%, `alert_service.py`: 98%, `european_aqi.py`: 97%, `analytics.py`: 97%, `air_quality.py`: 93%, `us_epa.py`: 93%, `deps.py`: 92%, `reports.py`: 91%)
 
 ---
 
@@ -735,16 +739,23 @@ cd frontend && npm test -- --run
 
 1. **Credential Isolation:** Neither `WAQI_API_KEY` nor `GEMINI_API_KEY` are bundled in client-side JavaScript. All external queries are sanitized through FastAPI.
 2. **Bcrypt 72-Byte Boundary Safety:** Passlib boundary overflows are prevented by explicit UTF-8 byte truncation in `get_password_hash()`.
-3. **HTTP Hardened Security Headers:** Custom middleware injects:
+3. **HTTP Hardened Security Headers & Reverse-Proxy Aware HSTS:** Custom middleware injects:
+   - `Strict-Transport-Security: max-age=31536000` (injected over HTTPS or `X-Forwarded-Proto: https`; bypasses local HTTP development).
    - `X-Content-Type-Options: nosniff`
    - `X-Frame-Options: DENY` (anti-clickjacking)
    - `X-XSS-Protection: 1; mode=block`
    - `Referrer-Policy: strict-origin-when-cross-origin`
    - `Permissions-Policy: geolocation=(self), camera=(), microphone=()`
-4. **Production Security Guards:**
+4. **Defense-in-Depth Content-Security-Policy (CSP) Architecture:**
+   - **Frontend Document Protection:** The static HTML shell (`aerosense-frontend.onrender.com`) enforces CSP configured directly via Render Static Site custom response headers (`default-src 'self'`, restricting scripts to `'self'`, permitting MapLibre and ArcGIS tiles, and disallowing `unsafe-eval`).
+   - **Backend API Isolation:** Pure data and telemetry routes (`/api/v1/*`, `/health`) enforce a strict `default-src 'none'; frame-ancestors 'none'` policy applied dynamically via FastAPI middleware.
+   - **Interactive Documentation:** Swagger UI routes (`/docs`, `/redoc`, `/openapi.json`) permit dedicated CDN resources (`cdn.jsdelivr.net`, `fastapi.tiangolo.com`) while locking framing (`frame-ancestors 'none'`).
+   - **Edge Infrastructure:** Cloudflare serves as Render's managed reverse-proxy CDN edge terminating TLS and providing automatic edge protection; it preserves and delivers the custom headers defined at the application and Render service layers.
+5. **CORS Defense-in-Depth:** Explicitly authorizes production frontend (`https://aerosense-frontend.onrender.com`) and local development origins, rejecting wildcard defaults.
+6. **Production Security Guards:**
    - In production mode (`ENVIRONMENT=production`), the application strictly raises `RuntimeError` if SQLite fallback is attempted.
    - `SECRET_KEY` must be at least 32 characters and cannot use default placeholders.
-5. **Prompt Injection Boundaries:** In `ai_service.py`, user inputs are framed in delimited blocks; system prompts prohibit revealing internal tool schemas or executing untrusted code.
+7. **Prompt Injection Boundaries:** In `ai_service.py`, user inputs are framed in delimited blocks; system prompts prohibit revealing internal tool schemas or executing untrusted code.
 
 ---
 
@@ -752,13 +763,20 @@ cd frontend && npm test -- --run
 
 AeroSense AI was engineered adhering to WCAG 2.2 AA accessibility principles across its design system and interface components (verified through programmatic inspection and manual component testing):
 
-1. **Contrast Ratios:**
+1. **WAI-ARIA 1.2 Combobox Search Architecture:**
+   - Global city search in `Navbar.tsx` implements full WAI-ARIA 1.2 Combobox pattern (`role="combobox"`, `aria-autocomplete="list"`, `aria-expanded`, `aria-controls="city-search-results-list"`).
+   - Dynamic active option tracking via `aria-activedescendant` referencing `city-option-${idx}`.
+   - Complete keyboard accessibility: `ArrowDown` (cycle down), `ArrowUp` (cycle up), `Enter` (select active option), and `Escape` (dismiss dropdown).
+   - Result options rendered as non-interactive `<div role="option">` elements, eliminating dual-interactive button nesting in the accessibility tree.
+2. **Dynamic Live Regions:**
+   - `aria-live="polite"` on AQI score updates and conversational AI response streams.
+   - `aria-live="assertive"` and `role="alert"` for critical environmental threshold exceedances in `AlertsView.tsx`.
+3. **Contrast Ratios:**
    - Dark Theme: High-contrast typography (`#f1f5f9` on `#0b1329`, ratio $> 14:1$).
    - Light Theme: Deep navy typography (`#0f172a` on `#f8fafc`, ratio $> 15:1$).
-2. **Color-Independent Indicators:** All AQI and pollutant indicators pair colors with text labels (*Good*, *Moderate*, *Unhealthy*) and iconography.
-3. **Form Controls:** All input elements feature explicit `id`, `htmlFor`, and `aria-label` attributes.
-4. **Keyboard Focus:** Visible focus indicators (`focus:ring-1 focus:ring-clima-accent`) across all buttons, terminal pills, and dropdowns.
-5. **Mobile Viewport Scaling:** `index.html` permits user scaling (`maximum-scale=5.0`, `user-scalable=yes`) ensuring compliance with WCAG 1.4.4.
+4. **Color-Independent Indicators:** All AQI and pollutant indicators pair colors with text labels (*Good*, *Moderate*, *Unhealthy*) and iconography.
+5. **Form Controls & Focus Management:** All input elements feature explicit `id`, `htmlFor`, and `aria-label` attributes with visible focus rings (`focus-visible:ring-1 focus-visible:ring-atlas-accent`).
+6. **Mobile Viewport Scaling:** `index.html` permits user scaling (`maximum-scale=5.0`, `user-scalable=yes`) ensuring compliance with WCAG 1.4.4.
 
 ---
 
@@ -767,10 +785,10 @@ AeroSense AI was engineered adhering to WCAG 2.2 AA accessibility principles acr
 | Evaluation Criterion | Implementation in AeroSense AI | Evidence / Verification |
 | :--- | :--- | :--- |
 | **A. Code Quality** | Decoupled, modular architecture with typed TypeScript frontend, asynchronous FastAPI backend, strict Pydantic v2 schemas, and zero circular dependencies. | Modular directory structure ([app/api/v1/](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/api/v1/), [app/services/](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/services/)); clean TypeScript compilation (`tsc && vite build`). |
-| **B. Security** | Complete server-side credential isolation, JWT authentication, bcrypt password hashing with 72-byte truncation, production SQLite blocker, 32+ char secret enforcement, and hardened HTTP headers. | [security.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/core/security.py), [test_security_resilience.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/tests/test_security_resilience.py), [config.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/core/config.py). |
+| **B. Security** | Complete server-side credential isolation, JWT authentication, bcrypt password hashing with 72-byte truncation, production SQLite blocker, 32+ char secret enforcement, reverse-proxy-aware HSTS, context-aware CSP, and hardened HTTP headers. | [security.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/core/security.py), [test_security_resilience.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/tests/test_security_resilience.py), [config.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/core/config.py), [main.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/main.py). |
 | **C. Efficiency** | Vite chunk-splitting (`maplibre`, `recharts`, `react-vendor`), debounced location search (300ms), lightweight Esri raster tiles, asyncpg connection pooling (`pool_size=5, max_overflow=5`), and non-blocking HTTPX async calls. | [vite.config.ts](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/vite.config.ts), [database.py](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/backend/app/core/database.py). |
-| **D. Testing** | Comprehensive automated test suites covering calculation engines, external providers, API endpoints, fault injection, edge cases, and AI function execution. | **47/47 passing tests** (39 Pytest + 8 Vitest). Verified execution outputs in Section 15. |
-| **E. Accessibility** | WCAG 2.2 AA verified contrast ratios across dual themes, mobile zoom enablement, keyboard focus indicators, explicit form labels, and color-independent severity indicators. | [index.html](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/index.html), [tailwind.config.js](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/tailwind.config.js), [OverviewDashboard.tsx](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/src/components/dashboard/OverviewDashboard.tsx). |
+| **D. Testing** | Comprehensive automated test suites covering calculation engines, external providers, API endpoints, auth error branches, fault injection, edge cases, and AI function execution. | **77/77 passing tests** (59 Pytest + 18 Vitest). Statement coverage: **83.4%**. Verified execution outputs in Section 15. |
+| **E. Accessibility** | Full WAI-ARIA 1.2 Combobox with active-descendant keyboard navigation (`ArrowDown`, `ArrowUp`, `Enter`, `Escape`), live regions (`aria-live="polite"` / `"assertive"`), WCAG 2.2 AA verified contrast ratios across dual themes, mobile zoom enablement, and color-independent indicators. | [Navbar.tsx](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/src/components/layout/Navbar.tsx), [index.html](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/index.html), [tailwind.config.js](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/tailwind.config.js), [OverviewDashboard.tsx](file:///c:/Users/ravis/OneDrive/Desktop/Airsense%20ai/frontend/src/components/dashboard/OverviewDashboard.tsx). |
 | **F. Problem Statement Alignment** | Specifically built for Urban Air Quality Assistance: verified ground sensor readings (WAQI), multi-standard AQI conversion, evidence-based activity safety, 24h predictive timeline, and grounded Gemini GenAI explanations. | Full feature inventory (Section 4); live application running at [https://aerosense-frontend.onrender.com](https://aerosense-frontend.onrender.com). |
 
 ---

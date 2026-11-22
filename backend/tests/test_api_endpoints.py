@@ -1,8 +1,10 @@
 import pytest
 import uuid
+from datetime import timedelta
 from httpx import AsyncClient, ASGITransport
 from app.main import app
 from app.core.database import engine, Base
+from app.core.security import create_access_token
 
 @pytest.fixture(autouse=True)
 async def init_test_db():
@@ -219,3 +221,81 @@ async def test_auth_and_alert_crud_lifecycle():
 
         del_loc = await client.delete(f"/api/v1/users/saved-locations/{loc_id}", headers=headers)
         assert del_loc.status_code == 204
+
+@pytest.mark.asyncio
+async def test_auth_duplicate_registration_rejected():
+    """Verify that registering with an already existing email returns HTTP 400."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        unique_email = f"dup_check_{uuid.uuid4().hex[:8]}@aerosense.ai"
+        payload = {
+            "email": unique_email,
+            "password": "InitialPassword123!",
+            "full_name": "Test User",
+            "preferred_standard": "US_EPA"
+        }
+        first_resp = await client.post("/api/v1/auth/register", json=payload)
+        assert first_resp.status_code == 201
+
+        # Second registration with exact same email must be rejected
+        dup_resp = await client.post("/api/v1/auth/register", json=payload)
+        assert dup_resp.status_code == 400
+        assert "A user with this email already exists." in dup_resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_auth_invalid_credentials_rejected():
+    """Verify that login fails with HTTP 400 for non-existent users and wrong passwords."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Non-existent email
+        ghost_resp = await client.post("/api/v1/auth/login", json={
+            "email": f"ghost_{uuid.uuid4().hex[:8]}@aerosense.ai",
+            "password": "SomePassword123!"
+        })
+        assert ghost_resp.status_code == 400
+        assert "Incorrect email or password" in ghost_resp.json()["detail"]
+
+        # Valid user with wrong password
+        valid_email = f"cred_test_{uuid.uuid4().hex[:8]}@aerosense.ai"
+        await client.post("/api/v1/auth/register", json={
+            "email": valid_email,
+            "password": "RealPassword123!"
+        })
+        wrong_pwd_resp = await client.post("/api/v1/auth/login", json={
+            "email": valid_email,
+            "password": "WrongPassword999!"
+        })
+        assert wrong_pwd_resp.status_code == 400
+        assert "Incorrect email or password" in wrong_pwd_resp.json()["detail"]
+
+@pytest.mark.asyncio
+async def test_auth_missing_header_rejected():
+    """Verify that endpoints requiring authentication reject unauthenticated requests with HTTP 401."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        me_resp = await client.get("/api/v1/auth/me")
+        assert me_resp.status_code == 401
+
+        rules_resp = await client.get("/api/v1/alerts/rules")
+        assert rules_resp.status_code == 401
+
+        saved_resp = await client.get("/api/v1/users/saved-locations")
+        assert saved_resp.status_code == 401
+
+@pytest.mark.asyncio
+async def test_auth_expired_and_invalid_tokens_rejected():
+    """Verify that expired and structurally invalid JWT tokens are rejected with HTTP 401."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        # Malformed JWT
+        malformed_resp = await client.get("/api/v1/auth/me", headers={"Authorization": "Bearer not-a-valid-token"})
+        assert malformed_resp.status_code == 401
+
+        # Expired JWT token
+        expired_token = create_access_token(
+            subject=str(uuid.uuid4()),
+            expires_delta=timedelta(seconds=-60)
+        )
+        expired_resp = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
+        assert expired_resp.status_code == 401
+        assert "Authentication credentials were not provided or invalid" in expired_resp.json()["detail"]

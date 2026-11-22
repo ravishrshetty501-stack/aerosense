@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
+import { CityComparisonItem } from '../../types/airQuality';
 import { GitCompare, Plus, Trash2, ArrowUpRight, ArrowDownRight, RefreshCw, Radio } from 'lucide-react';
 
 export const CityComparisonView: React.FC = () => {
@@ -14,7 +15,7 @@ export const CityComparisonView: React.FC = () => {
   };
 
   const [citiesToCompare, setCitiesToCompare] = useState<string[]>(() => getInitialCities(activeCity.name));
-  const [comparisonData, setComparisonData] = useState<any[]>([]);
+  const [comparisonData, setComparisonData] = useState<CityComparisonItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [newCityInput, setNewCityInput] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -233,7 +234,7 @@ export const CityComparisonView: React.FC = () => {
 
                 {/* Footer Attribution */}
                 <div className="mt-5 pt-3 border-t border-clima-border dark:border-darkClima-border text-[10px] text-clima-muted dark:text-darkClima-muted flex items-center justify-between font-sans">
-                  <span className="truncate max-w-[200px]" title={item.primary_source}>
+                  <span className="truncate max-w-[200px]" title={item.primary_source || undefined}>
                     {item.primary_source}
                   </span>
                   <span className="px-1.5 py-0.5 rounded bg-clima-subtle dark:bg-darkClima-subtle text-clima-text dark:text-darkClima-text font-mono">

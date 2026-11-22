@@ -73,3 +73,70 @@ export interface MonitoringStation {
   last_updated?: string;
   type: string;
 }
+
+export interface CityComparisonItem {
+  city: string;
+  country?: string | null;
+  latitude: number;
+  longitude: number;
+  aqi: number | null;
+  category?: string | null;
+  color?: string | null;
+  dominant_pollutant?: string | null;
+  pm25?: number | null;
+  pm10?: number | null;
+  no2?: number | null;
+  o3?: number | null;
+  primary_source?: string | null;
+  is_ground_observation?: boolean;
+  freshness_minutes?: number | null;
+}
+
+export interface CityComparisonResponse {
+  standard: AQIStandard;
+  comparison: CityComparisonItem[];
+}
+
+export interface ProviderStatusInfo {
+  name: string;
+  role: string;
+  status: string;
+  details: string;
+  last_successful_retrieval?: string | null;
+}
+
+export interface NetworkStatusResponse {
+  status: string;
+  timestamp: string;
+  providers: {
+    waqi?: ProviderStatusInfo;
+    open_meteo?: ProviderStatusInfo;
+    gemini_ai?: ProviderStatusInfo;
+    openaq?: ProviderStatusInfo;
+    [key: string]: ProviderStatusInfo | undefined;
+  };
+}
+
+export interface ReportMeasurementItem {
+  value: number | null;
+  unit: string;
+  type: string;
+  source: string;
+  timestamp?: string;
+}
+
+export interface ReportDataResponse {
+  title?: string;
+  city: string;
+  period: string;
+  generated_at: string;
+  aqi_standard?: string;
+  aqi_value: number | null;
+  aqi_category: string;
+  dominant_pollutant: string;
+  primary_source: string;
+  is_ground_observation: boolean;
+  measurements: Record<string, ReportMeasurementItem>;
+  health_advisory: string;
+  forecast_summary?: string;
+}

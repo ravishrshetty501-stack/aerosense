@@ -1,4 +1,11 @@
-import { AirQualityResponse, AQIStandard, MonitoringStation } from '../types/airQuality';
+import {
+  AirQualityResponse,
+  AQIStandard,
+  MonitoringStation,
+  CityComparisonResponse,
+  NetworkStatusResponse,
+  ReportDataResponse,
+} from '../types/airQuality';
 import { User, AuthResponse, SavedLocation, AlertRule, AlertEvent } from '../types/user';
 
 const API_BASE = '/api/v1';
@@ -49,7 +56,7 @@ export const api = {
   },
 
   // Analytics & Comparison
-  async compareCities(cities: string[], standard: AQIStandard = 'US_EPA') {
+  async compareCities(cities: string[], standard: AQIStandard = 'US_EPA'): Promise<CityComparisonResponse> {
     const params = new URLSearchParams();
     cities.forEach(c => params.append('cities', c));
     params.set('standard', standard);
@@ -145,7 +152,7 @@ export const api = {
   },
 
   // Reports
-  async getReportData(city: string, period: string, standard: AQIStandard) {
+  async getReportData(city: string, period: string, standard: AQIStandard): Promise<ReportDataResponse> {
     const res = await fetch(`${API_BASE}/reports/data?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}&standard=${standard}`);
     if (!res.ok) throw new Error('Failed to load report data');
     return res.json();
@@ -162,7 +169,7 @@ export const api = {
     return res.json();
   },
 
-  async getNetworkStatus() {
+  async getNetworkStatus(): Promise<NetworkStatusResponse> {
     const res = await fetch(`${API_BASE}/system/network-status`);
     if (!res.ok) throw new Error('Failed to fetch network status');
     return res.json();

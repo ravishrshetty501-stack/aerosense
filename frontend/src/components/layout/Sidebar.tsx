@@ -13,6 +13,7 @@ import {
   ChevronRight
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { NetworkStatusResponse } from '../../types/airQuality';
 
 export type NavTab = 'dashboard' | 'map' | 'analytics' | 'ai' | 'compare' | 'advisor' | 'reports' | 'alerts';
 
@@ -26,7 +27,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
     const saved = localStorage.getItem('aerosense_rail_collapsed');
     return saved === 'true';
   });
-  const [networkInfo, setNetworkInfo] = useState<any>(null);
+  const [networkInfo, setNetworkInfo] = useState<NetworkStatusResponse | null>(null);
 
   useEffect(() => {
     localStorage.setItem('aerosense_rail_collapsed', String(collapsed));

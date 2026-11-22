@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
+import { ReportDataResponse, ReportMeasurementItem } from '../../types/airQuality';
 import { FileText, Download, RefreshCw, CheckCircle2, ShieldCheck, Layers } from 'lucide-react';
 
 export const ReportsView: React.FC = () => {
   const { activeCity, standard } = useAQI();
   const [period, setPeriod] = useState<string>('Daily Summary');
-  const [reportData, setReportData] = useState<any | null>(null);
+  const [reportData, setReportData] = useState<ReportDataResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   useEffect(() => {
@@ -136,7 +137,7 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-clima-border/80 dark:divide-darkClima-border/80 font-sans">
-                  {Object.entries(reportData.measurements || {}).map(([key, val]: [string, any]) => (
+                  {Object.entries(reportData.measurements || {}).map(([key, val]: [string, ReportMeasurementItem]) => (
                     <tr key={key} className="hover:bg-clima-subtle/40 dark:hover:bg-darkClima-subtle/40">
                       <td className="px-4 py-2.5 font-bold font-mono text-clima-accent dark:text-darkClima-accent uppercase">{key}</td>
                       <td className="px-4 py-2.5 font-mono text-clima-text dark:text-darkClima-text font-semibold">{val.value ?? 'Unavailable'}</td>
