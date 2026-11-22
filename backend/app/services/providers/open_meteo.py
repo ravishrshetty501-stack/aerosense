@@ -1,4 +1,5 @@
 import logging
+import time
 import httpx
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional, List
@@ -14,9 +15,17 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
     """
     BASE_URL = "https://air-quality-api.open-meteo.com/v1/air-quality"
     GEOCODING_URL = "https://geocoding-api.open-meteo.com/v1/search"
+    DEFAULT_HEADERS = {
+        "User-Agent": "AeroSense-AI/1.0 (https://github.com/ravishrshetty501-stack/aerosense)"
+    }
+
+    def __init__(self):
+        self._cache: Dict[str, Dict[str, Any]] = {}
+        self._cache_expiry: Dict[str, float] = {}
+        self._cache_ttl: float = 900.0  # 15 minutes TTL for atmospheric reanalysis & forecast
 
     async def search_locations(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        async with httpx.AsyncClient(timeout=10.0) as client:
+        async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=10.0) as client:
             try:
                 resp = await client.get(
                     self.GEOCODING_URL,
@@ -43,7 +52,13 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
     async def get_current_air_quality(self, lat: float, lon: float, location_name: str = "") -> Optional[Dict[str, Any]]:
         """
         Retrieves current air quality estimates and hourly series from Open-Meteo.
+        Includes in-memory TTL caching and graceful degradation to mitigate upstream rate limiting.
         """
+        cache_key = f"{round(lat, 2)}_{round(lon, 2)}"
+        now = time.time()
+        if cache_key in self._cache and now < self._cache_expiry.get(cache_key, 0):
+            return self._cache[cache_key]
+
         params = {
             "latitude": lat,
             "longitude": lon,
@@ -60,11 +75,14 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
             "timezone": "auto"
         }
         
-        async with httpx.AsyncClient(timeout=12.0) as client:
+        async with httpx.AsyncClient(headers=self.DEFAULT_HEADERS, timeout=12.0) as client:
             try:
                 resp = await client.get(self.BASE_URL, params=params)
                 if resp.status_code != 200:
-                    logger.warning("[OpenMeteo] API error: status %s", resp.status_code)
+                    logger.warning("[OpenMeteo] API error: status %s for (%s, %s)", resp.status_code, lat, lon)
+                    if cache_key in self._cache:
+                        logger.info("[OpenMeteo] Serving stale cached telemetry for %s", cache_key)
+                        return self._cache[cache_key]
                     return None
                     
                 data = resp.json()
@@ -138,7 +156,7 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
                             "type": "forecast" if is_future else "model_estimate"
                         })
                         
-                return {
+                result_data = {
                     "source": "Open-Meteo Air Quality",
                     "latitude": lat,
                     "longitude": lon,
@@ -151,8 +169,14 @@ class OpenMeteoAirQualityProvider(EnvironmentalProvider):
                     "provider_european_aqi": current_raw.get("european_aqi"),
                     "hourly_series": trend_records
                 }
+                self._cache[cache_key] = result_data
+                self._cache_expiry[cache_key] = now + self._cache_ttl
+                return result_data
             except Exception as e:
-                logger.warning("[OpenMeteo] Exception querying air quality: %s", e)
+                logger.warning("[OpenMeteo] Exception querying air quality for (%s, %s): %s", lat, lon, e)
+                if cache_key in self._cache:
+                    logger.info("[OpenMeteo] Serving cached telemetry on exception for %s", cache_key)
+                    return self._cache[cache_key]
                 return None
 
     async def get_hourly_trends(self, lat: float, lon: float, past_days: int = 2, forecast_days: int = 3) -> Optional[Dict[str, Any]]:
