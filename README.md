@@ -91,59 +91,64 @@ AeroSense AI solves these challenges with an asynchronous, decoupled architectur
 
 ```mermaid
 flowchart TD
-    subgraph Client["Frontend Client (React 18 + TypeScript + Vite)"]
+    subgraph Client["Frontend Client (React 18 / TypeScript / Vite)"]
         UI["Scientific Observatory Workstation UI<br/>(Overview, Map, Analytics, AI, Reports)"]
-        TC["Theme & Context Layer<br/>(AQIContext, ThemeContext, AuthContext)"]
+        TC["State and Theme Context Layer<br/>(AQIContext, ThemeContext, AuthContext)"]
         GIS["MapLibre GL GIS Canvas<br/>(Esri Canvas Raster Basemap)"]
     end
 
-    subgraph Gateway["API Gateway & Security Boundary (FastAPI)"]
+    subgraph Gateway["API Gateway and Security Boundary (FastAPI)"]
+        CorsMW["CORS and Security Headers Middleware<br/>(nosniff, DENY frame, XSS protect)"]
         FastAPI["FastAPI 0.110+ Router (/api/v1)"]
-        CorsMW["CORS & Security Headers Middleware<br/>(nosniff, DENY frame, XSS protect)"]
-        AuthMW["JWT Bearer Authenticator<br/>(Bcrypt 72-byte safe)"]
         HealthProbe["Lightweight Health Probe (/health)"]
+        AuthMW["JWT Bearer Authenticator<br/>(Bcrypt 72-byte safe)"]
     end
 
     subgraph BackendCore["Backend Services Engine"]
         DM["Unified Environmental Data Manager"]
-        AQIEngine["Deterministic AQI Engine<br/>(US EPA, CPCB, EAQI, WHO Matrix)"]
-        AISvc["Gemini GenAI Orchestrator<br/>(8 Declared Function Tools)"]
-        AlertSvc["Threshold Alert & Spike Detection Engine"]
+        AQIEngine["Deterministic AQI Engine<br/>(US EPA, India CPCB, European EAQI)"]
+        AISvc["Google Gemini AI Orchestrator<br/>(8 Declared Function Tools)"]
+        AlertSvc["Threshold Alert and Spike Detection Engine"]
         PDFSvc["ReportLab PDF Compilation Engine"]
     end
 
     subgraph DataStorage["Production Persistence Layer"]
-        DB[(Neon Serverless PostgreSQL 18<br/>AWS Singapore | asyncpg Connection Pool)]
+        DB[("Neon Serverless PostgreSQL<br/>SQLAlchemy 2 Async and asyncpg")]
     end
 
     subgraph ExternalProviders["External Intelligence Providers"]
-        WAQI["WAQI API<br/>(30,000+ Ground Sensor Stations)"]
-        OpenMeteo["Open-Meteo Atmospheric API<br/>(Copernicus CAMS & 72h Forecast)"]
-        GeminiAPI["Google Gemini 2.5 Flash API<br/>(Function Calling & Interpretation)"]
+        WAQI["WAQI Ground Station Network<br/>(Physical In-Situ Observations)"]
+        OpenMeteo["Open-Meteo Atmospheric API<br/>(Copernicus CAMS and 72h Forecast)"]
+        GeminiAPI["Google Gemini 2.5 Flash API<br/>(AI Environmental Interpretation)"]
     end
 
-    UI -->|Async HTTP / REST| FastAPI
-    FastAPI --> CorsMW --> AuthMW
-    AuthMW --> DM
-    AuthMW --> AISvc
+    UI -->|Async HTTP Requests| CorsMW
+    TC -.-> UI
+    GIS -.-> UI
+
+    CorsMW --> FastAPI
+    FastAPI --> HealthProbe
+    FastAPI -->|Public Ingestion Routes| DM
+    FastAPI -->|Conversational AI Routes| AISvc
+    FastAPI -->|Protected Analyst Routes| AuthMW
+
     AuthMW --> AlertSvc
     AuthMW --> PDFSvc
 
-    DM -->|Bounds & Station Feed| WAQI
-    DM -->|CAMS Model & Hourly Forecast| OpenMeteo
+    DM -->|Ground Station Geo Feed| WAQI
+    DM -->|CAMS Model and Forecast Feed| OpenMeteo
     DM --> AQIEngine
 
-    AISvc -->|Function Tool Request| DM
-    AISvc -->|Structured Prompting| GeminiAPI
+    AISvc -->|Function Tool Requests| DM
+    AISvc -->|Structured Grounded Prompts| GeminiAPI
     GeminiAPI -->|Tool Call Execution| AISvc
 
     AlertSvc --> DB
     PDFSvc --> DB
-    FastAPI --> DB
+    AuthMW -->|User Profiles and Bookmarks| DB
 
     AQIEngine --> FastAPI
     FastAPI -->|Unified JSON Response| UI
-    GIS -->|Direct Esri Basemap Tiles| Client
 ```
 
 ---
