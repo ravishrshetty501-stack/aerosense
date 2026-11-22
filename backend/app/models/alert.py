@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Boolean, Tex
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
-from app.core.database import Base
+from app.core.database import Base, utc_now
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -19,7 +19,7 @@ class AlertRule(Base):
     pollutant = Column(String(32), default="aqi") # 'aqi', 'pm25', 'pm10', 'o3'
     severity = Column(String(32), default="warning") # advisory, warning, critical
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=utc_now)
     
     user = relationship("User", back_populates="alert_rules")
     events = relationship("AlertEvent", back_populates="rule", cascade="all, delete-orphan")
@@ -36,6 +36,6 @@ class AlertEvent(Base):
     severity = Column(String(32), nullable=False)
     message = Column(Text, nullable=False)
     acknowledged = Column(Boolean, default=False)
-    triggered_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    triggered_at = Column(DateTime, default=utc_now, index=True)
     
     rule = relationship("AlertRule", back_populates="events")

@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, Float, DateTime, ForeignKey, Index, Text,
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
-from app.core.database import Base
+from app.core.database import Base, utc_now
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -17,7 +17,7 @@ class Location(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     timezone = Column(String(64), default="UTC")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=utc_now)
 
 class MonitoringStation(Base):
     __tablename__ = "monitoring_stations"
@@ -48,7 +48,7 @@ class Measurement(Base):
     source = Column(String(128), nullable=False) # "OpenAQ / Station #1234", "Open-Meteo CAMS"
     data_quality = Column(String(32), default="verified") # verified, provisional, estimated
     observation_timestamp = Column(DateTime, nullable=False, index=True)
-    retrieval_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    retrieval_timestamp = Column(DateTime, default=utc_now)
     
     __table_args__ = (
         Index("idx_pollutant_time", "pollutant", "observation_timestamp"),
@@ -65,5 +65,5 @@ class AQICalculation(Base):
     category = Column(String(64), nullable=False) # Good, Moderate, Unhealthy, etc.
     dominant_pollutant = Column(String(32), nullable=False)
     pollutant_subindices = Column(Text, nullable=True) # JSON serialized dictionary of subindices
-    calculation_timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    calculation_timestamp = Column(DateTime, default=utc_now)
     is_reliable = Column(String(16), default="true") # true or false

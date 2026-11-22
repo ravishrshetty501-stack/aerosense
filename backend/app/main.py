@@ -11,11 +11,8 @@ from app.core.database import engine, Base
 APP_START_TIME = time.time()
 
 # Import all models so SQLAlchemy discovers them before creating tables
-import app.models.user
-import app.models.measurement
-import app.models.alert
-import app.models.chat
-import app.models.report
+import app.models
+from app.core.database import close_db_connections
 
 # Import Routers
 from app.api.v1.auth import router as auth_router
@@ -32,11 +29,12 @@ from app.api.v1.system import router as system_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: ensure tables exist
+    import app.models
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
-    # Shutdown
-    await engine.dispose()
+    # Shutdown: cleanly dispose all connection pools
+    await close_db_connections()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

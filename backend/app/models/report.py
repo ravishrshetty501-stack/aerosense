@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, DateTime, ForeignKey, Text, Float
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
-from app.core.database import Base
+from app.core.database import Base, utc_now
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -20,7 +20,7 @@ class EnvironmentalReport(Base):
     metrics_json = Column(Text, nullable=False) # JSON data for all chart trends and pollutants
     recommendations_json = Column(Text, nullable=True)
     sources_json = Column(Text, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=utc_now)
     
     user = relationship("User", back_populates="reports")
 
@@ -34,4 +34,4 @@ class APIUsageLog(Base):
     response_time_ms = Column(Float, nullable=False)
     client_ip = Column(String(64), nullable=True)
     user_id = Column(String(36), nullable=True)
-    timestamp = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    timestamp = Column(DateTime, default=utc_now, index=True)

@@ -8,6 +8,7 @@ async def init_test_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield
+    await engine.dispose()
 
 @pytest.mark.asyncio
 async def test_health_endpoint():

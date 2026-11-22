@@ -2,7 +2,7 @@ from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer, F
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
-from app.core.database import Base
+from app.core.database import Base, utc_now
 
 def generate_uuid():
     return str(uuid.uuid4())
@@ -18,8 +18,8 @@ class User(Base):
     is_superuser = Column(Boolean, default=False)
     preferred_standard = Column(String(32), default="US_EPA") # US_EPA, INDIA_CPCB, EUROPEAN_AQI
     theme = Column(String(32), default="dark") # dark, light
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=utc_now)
+    updated_at = Column(DateTime, default=utc_now, onupdate=utc_now)
     
     saved_locations = relationship("SavedLocation", back_populates="user", cascade="all, delete-orphan")
     alert_rules = relationship("AlertRule", back_populates="user", cascade="all, delete-orphan")
@@ -36,6 +36,6 @@ class SavedLocation(Base):
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     is_favorite = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=utc_now)
     
     user = relationship("User", back_populates="saved_locations")
