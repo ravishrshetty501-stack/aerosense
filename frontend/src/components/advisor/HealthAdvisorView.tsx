@@ -129,7 +129,7 @@ export const HealthAdvisorView: React.FC = () => {
               </h2>
               <p className="text-xs text-clima-muted dark:text-darkClima-muted mt-0.5">
                 Evidence-based outdoor activity risk assessment calibrated to {activeCity.name} (Current {standard.replace('_', ' ')} AQI:{' '}
-                <span className="font-mono font-bold" style={{ color: currentResult.color }}>
+                <span className="font-mono font-bold text-clima-text dark:text-darkClima-text underline decoration-2" style={{ textDecorationColor: currentResult.color }}>
                   {aqi}
                 </span>
                 , Dominant: <span className="font-mono text-clima-accent dark:text-darkClima-accent">{dominant}</span>).

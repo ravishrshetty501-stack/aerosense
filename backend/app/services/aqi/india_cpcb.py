@@ -93,8 +93,9 @@ def calculate_india_cpcb_aqi(measurements: Dict[str, float]) -> Dict:
     """
     subindices = {}
     for p, val in measurements.items():
-        if val is not None and val >= 0:
-            sub = calculate_cpcb_subindex(p, val)
+        if val is not None:
+            clean_val = max(0.0, float(val))
+            sub = calculate_cpcb_subindex(p, clean_val)
             if sub is not None:
                 subindices[p.lower()] = sub
                 

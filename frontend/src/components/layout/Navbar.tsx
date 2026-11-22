@@ -100,7 +100,7 @@ export const Navbar: React.FC = () => {
           <MapPin className="w-3 h-3 text-atlas-accent dark:text-darkAtlas-accent shrink-0" />
           <span className="font-medium truncate max-w-[130px]">{activeCity.name}</span>
           {activeCity.country && (
-            <span className="text-atlas-muted dark:text-darkAtlas-muted text-[11px] truncate">
+            <span className="text-slate-600 dark:text-slate-300 text-[11px] truncate font-normal">
               ({activeCity.country})
             </span>
           )}
@@ -179,7 +179,7 @@ export const Navbar: React.FC = () => {
                 className={`px-2.5 py-1 rounded-md font-sans transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent ${
                   isSelected
                     ? 'bg-atlas-surface dark:bg-darkAtlas-surface text-atlas-accent dark:text-darkAtlas-accent font-semibold shadow-sm'
-                    : 'text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text'
+                    : 'text-slate-700 dark:text-slate-200 hover:text-slate-950 dark:hover:text-white font-medium'
                 }`}
               >
                 {std === 'US_EPA' ? 'US EPA' : std === 'INDIA_CPCB' ? 'India CPCB' : 'EU EAQI'}

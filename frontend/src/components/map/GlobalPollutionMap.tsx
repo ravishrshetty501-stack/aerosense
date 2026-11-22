@@ -182,6 +182,8 @@ export const GlobalPollutionMap: React.FC = () => {
     // 1. Target Location Marker (CliMA Scope Focus Ring)
     const cityEl = document.createElement('div');
     cityEl.className = 'active-focus-marker';
+    cityEl.setAttribute('role', 'img');
+    cityEl.setAttribute('aria-label', `Geographical Focus Location: ${activeCity.name}`);
     cityEl.style.width = '20px';
     cityEl.style.height = '20px';
     cityEl.style.borderRadius = '50%';
@@ -221,8 +223,10 @@ export const GlobalPollutionMap: React.FC = () => {
       if (!st.latitude || !st.longitude) return;
 
       const color = getAQIColor(st.aqi);
-      const stEl = document.createElement('div');
+      const stEl = document.createElement('button');
+      stEl.type = 'button';
       stEl.className = 'scientific-station-pin';
+      stEl.setAttribute('aria-label', `Ground Station ${st.name}, AQI ${st.aqi ?? 'unavailable'}`);
       stEl.style.padding = '2px 5px';
       stEl.style.borderRadius = '4px';
       stEl.style.backgroundColor = resolvedTheme === 'dark' ? '#172426' : '#FFFFFF';
@@ -412,7 +416,7 @@ export const GlobalPollutionMap: React.FC = () => {
                   }`}
                 >
                   <div className="text-[11px] leading-tight">{v.label}</div>
-                  <div className={`text-[8.5px] truncate ${isSelected ? 'text-white/80 dark:text-darkClima-bg/80' : 'text-clima-muted dark:text-darkClima-muted'}`}>
+                  <div className={`text-[8.5px] truncate ${isSelected ? 'text-white font-medium' : 'text-clima-muted dark:text-darkClima-muted'}`}>
                     {v.desc}
                   </div>
                 </button>
@@ -586,6 +590,7 @@ export const GlobalPollutionMap: React.FC = () => {
               <div className="hidden sm:flex items-center space-x-1 text-[11px] text-clima-muted dark:text-darkClima-muted">
                 <span>Step:</span>
                 <select
+                  aria-label="Temporal Step Interval"
                   value={temporalStep}
                   onChange={(e) => setTemporalStep(e.target.value as any)}
                   className="bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded px-1.5 py-0.5 text-[11px] text-clima-text dark:text-darkClima-text focus:outline-none"
@@ -669,6 +674,7 @@ export const GlobalPollutionMap: React.FC = () => {
                 {/* Scrubber Range Slider */}
                 <input
                   type="range"
+                  aria-label="24-hour forecast timeline scrubber"
                   min="0"
                   max={Math.max(0, timelinePoints.length - 1)}
                   value={timelineIndex}

@@ -14,9 +14,13 @@ def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
     return bcrypt.hashpw(password_bytes, salt).decode('utf-8')
 
-def create_access_token(subject: str | Any, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(subject: str | Any, expires_delta: Optional[Any] = None) -> str:
     if expires_delta:
-        expire = datetime.now(timezone.utc) + expires_delta
+        if isinstance(expires_delta, (int, float)):
+            delta = timedelta(seconds=expires_delta)
+        else:
+            delta = expires_delta
+        expire = datetime.now(timezone.utc) + delta
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
     

@@ -21,14 +21,15 @@ class Settings(BaseSettings):
     WAQI_API_KEY: Optional[str] = os.getenv("WAQI_API_KEY", "")
     GEMINI_API_KEY: Optional[str] = os.getenv("GEMINI_API_KEY", "")
     
-    # CORS
+    # CORS: Explicit allowed origins (never wildcard '*' with credentials)
     BACKEND_CORS_ORIGINS: List[str] = [
         "http://localhost:5173",
+        "http://localhost:8000",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
+        "http://127.0.0.1:8000",
         "http://127.0.0.1:3000",
-        "https://aerosense-ai.vercel.app",
-        "*"
+        "https://aerosense-ai.vercel.app"
     ]
     
     # Rate Limiting & Safety

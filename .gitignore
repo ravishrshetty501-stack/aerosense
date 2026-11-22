@@ -5,6 +5,10 @@ __pycache__/
 *$py.class
 *.sqlite3
 *.db
+# Test coverage & intermediate files
+.coverage
+cov.json
+htmlcov/
 .pytest_cache/
 
 # Node & Frontend

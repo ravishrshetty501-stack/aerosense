@@ -45,6 +45,7 @@ export const ReportsView: React.FC = () => {
         {/* Action Controls */}
         <div className="flex items-center space-x-2.5">
           <select
+            aria-label="Reporting Interval"
             value={period}
             onChange={(e) => setPeriod(e.target.value)}
             className="bg-clima-surface dark:bg-darkClima-surface border border-clima-border dark:border-darkClima-border rounded-lg px-3 py-1.5 text-xs text-clima-text dark:text-darkClima-text focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent font-sans"
@@ -108,7 +109,7 @@ export const ReportsView: React.FC = () => {
             </div>
             <div>
               <span className="text-[10px] text-clima-muted dark:text-darkClima-muted font-sans block">Ingestion Mode</span>
-              <span className="font-sans text-[#23966B] font-semibold text-xs mt-0.5 block">
+              <span className="font-sans text-[#0f6848] dark:text-[#4BBF87] font-semibold text-xs mt-0.5 block">
                 {reportData.is_ground_observation ? 'Ground Telemetry' : 'Model Estimate'}
               </span>
             </div>

@@ -110,8 +110,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
               aria-current={isActive ? 'page' : undefined}
               className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent ${
                 isActive
-                  ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-accent dark:text-darkAtlas-accent font-semibold border-l-2 border-atlas-accent dark:border-darkAtlas-accent shadow-sm'
-                  : 'text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text hover:bg-atlas-subtle/50 dark:hover:bg-darkAtlas-subtle/50'
+                  ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-[#045950] dark:text-[#00f5d4] font-semibold border-l-2 border-atlas-accent dark:border-darkAtlas-accent shadow-sm'
+                  : 'text-slate-600 dark:text-slate-300 hover:text-atlas-text dark:hover:text-darkAtlas-text hover:bg-atlas-subtle/50 dark:hover:bg-darkAtlas-subtle/50'
               } ${collapsed ? 'justify-center px-0' : ''}`}
             >
               <Icon className={`w-4 h-4 shrink-0 ${isActive ? 'text-atlas-accent dark:text-darkAtlas-accent' : 'text-atlas-muted dark:text-darkAtlas-muted'}`} />

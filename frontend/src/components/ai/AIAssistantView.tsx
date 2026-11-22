@@ -280,7 +280,7 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
                 <h3 className="text-sm font-bold text-clima-text dark:text-darkClima-text font-sans">
                   AeroSense Environmental Intelligence Assistant
                 </h3>
-                <span className="text-[10px] font-mono px-2 py-0.5 bg-[#23966B]/15 text-[#23966B] border border-[#23966B]/30 rounded-full font-medium">
+                <span className="text-[10px] font-mono px-2 py-0.5 bg-[#23966B]/15 text-[#0f6848] dark:text-[#4BBF87] border border-[#23966B]/30 rounded-full font-medium">
                   Grounded Engine
                 </span>
               </div>
@@ -396,6 +396,7 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
             <button
               type="submit"
               disabled={!inputPrompt.trim() || loading}
+              aria-label="Send message to AI Assistant"
               className="p-2.5 bg-clima-accent dark:bg-darkClima-accent hover:opacity-90 disabled:opacity-40 text-white dark:text-darkClima-bg rounded-lg transition-colors shadow-sm"
             >
               <Send className="w-4 h-4" />

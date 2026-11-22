@@ -34,7 +34,7 @@ export const ForecastTimeline: React.FC = () => {
         </span>
       </div>
 
-      <div className="overflow-x-auto pb-1 pt-1">
+      <div className="overflow-x-auto pb-1 pt-1" tabIndex={0} aria-label="24-hour horizontal forecast timeline" role="region">
         <div className="flex space-x-2 min-w-max">
           {next24h.map((item, idx) => {
             const timeObj = new Date(item.time);

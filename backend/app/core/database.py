@@ -13,6 +13,12 @@ elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+as
 engine_args = {}
 if "sqlite" in db_url:
     engine_args["connect_args"] = {"check_same_thread": False}
+elif "postgresql" in db_url:
+    # Production PostgreSQL connection pooling parameters
+    engine_args["pool_size"] = 10
+    engine_args["max_overflow"] = 20
+    engine_args["pool_pre_ping"] = True
+    engine_args["pool_recycle"] = 3600
 
 engine = create_async_engine(
     db_url,

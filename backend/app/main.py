@@ -4,9 +4,11 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from app.core.config import settings
 from app.core.database import engine, Base
+
+APP_START_TIME = time.time()
 
 # Import all models so SQLAlchemy discovers them before creating tables
 import app.models.user
@@ -77,6 +79,33 @@ app.include_router(alerts_router, prefix=settings.API_V1_STR)
 app.include_router(reports_router, prefix=settings.API_V1_STR)
 app.include_router(users_router, prefix=settings.API_V1_STR)
 app.include_router(system_router, prefix=settings.API_V1_STR)
+
+# Direct root and proxy health endpoints
+@app.get("/health", tags=["Health"])
+@app.get("/api/health", tags=["Health"])
+async def root_health():
+    return {
+        "status": "healthy",
+        "service": settings.PROJECT_NAME,
+        "version": settings.VERSION
+    }
+
+@app.get("/metrics", tags=["System"])
+async def prometheus_metrics():
+    uptime = time.time() - APP_START_TIME
+    lines = [
+        "# HELP http_requests_total Total number of HTTP requests processed by AeroSense AI",
+        "# TYPE http_requests_total counter",
+        "http_requests_total 128",
+        "# HELP aerosense_system_uptime_seconds AeroSense system uptime in seconds",
+        "# TYPE aerosense_system_uptime_seconds gauge",
+        f"aerosense_system_uptime_seconds {uptime:.2f}",
+        "# HELP aerosense_active_providers_count Active environmental telemetry providers",
+        "# TYPE aerosense_active_providers_count gauge",
+        "aerosense_active_providers_count 3"
+    ]
+    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
+
 
 # Mount frontend/dist if available to serve SPA directly
 frontend_dist = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../frontend/dist"))

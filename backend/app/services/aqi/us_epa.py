@@ -100,8 +100,10 @@ def calculate_us_epa_aqi(measurements: Dict[str, float]) -> Dict:
     """
     subindices = {}
     for p, val in measurements.items():
-        if val is not None and val >= 0:
-            sub = calculate_epa_subindex(p, val)
+        if val is not None:
+            # Clamp negative sensor baseline calibration noise to 0.0
+            clean_val = max(0.0, float(val))
+            sub = calculate_epa_subindex(p, clean_val)
             if sub is not None:
                 subindices[p.lower()] = sub
                 

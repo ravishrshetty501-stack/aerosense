@@ -200,9 +200,12 @@ export const AlertsView: React.FC = () => {
 
             <form onSubmit={handleCreateRule} className="space-y-4 text-xs font-sans">
               <div>
-                <label className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Monitored City or Region</label>
+                <label htmlFor="alert-city-input" className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Monitored City or Region</label>
                 <input
+                  id="alert-city-input"
                   type="text"
+                  placeholder="e.g. Tokyo, London, Delhi"
+                  aria-label="Monitored City or Region"
                   value={locationName}
                   onChange={(e) => setLocationName(e.target.value)}
                   className="w-full bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded-lg p-2.5 text-clima-text dark:text-darkClima-text focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent"
@@ -211,8 +214,10 @@ export const AlertsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Target Parameter</label>
+                <label htmlFor="alert-target-param" className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Target Parameter</label>
                 <select
+                  id="alert-target-param"
+                  aria-label="Target Parameter"
                   value={pollutant}
                   onChange={(e) => setPollutant(e.target.value)}
                   className="w-full bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded-lg p-2.5 text-clima-text dark:text-darkClima-text focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent"
@@ -225,9 +230,12 @@ export const AlertsView: React.FC = () => {
               </div>
 
               <div>
-                <label className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Threshold Level</label>
+                <label htmlFor="alert-threshold-input" className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Threshold Level</label>
                 <input
+                  id="alert-threshold-input"
                   type="number"
+                  placeholder="e.g. 100"
+                  aria-label="Threshold Level"
                   value={threshold}
                   onChange={(e) => setThreshold(Number(e.target.value))}
                   className="w-full bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded-lg p-2.5 text-clima-text dark:text-darkClima-text font-mono focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent"

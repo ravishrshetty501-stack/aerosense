@@ -442,7 +442,7 @@ class AIService:
         if not settings.GEMINI_API_KEY:
             return await self._deterministic_reasoning(clean_prompt, location_hint)
 
-        endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={settings.GEMINI_API_KEY}"
+        candidate_models = ["gemini-2.5-flash-lite", "gemini-flash-latest", "gemini-3.8-flash"]
         
         contents = []
         if conversation_history:
@@ -472,77 +472,82 @@ class AIService:
         }
 
         async with httpx.AsyncClient(timeout=25.0) as client:
-            try:
-                resp = await client.post(endpoint, json=body)
-                if resp.status_code != 200:
-                    print(f"[Gemini] Error status {resp.status_code}: {resp.text}")
-                    return await self._deterministic_reasoning(clean_prompt, location_hint)
+            for model_name in candidate_models:
+                endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={settings.GEMINI_API_KEY}"
+                try:
+                    resp = await client.post(endpoint, json=body)
+                    if resp.status_code != 200:
+                        print(f"[Gemini {model_name}] Error status {resp.status_code}: {resp.text[:120]}")
+                        continue
 
-                data = resp.json()
-                candidates = data.get("candidates", [])
-                if not candidates:
-                    return await self._deterministic_reasoning(clean_prompt, location_hint)
+                    data = resp.json()
+                    candidates = data.get("candidates", [])
+                    if not candidates:
+                        continue
 
-                first_candidate = candidates[0]
-                content = first_candidate.get("content", {})
-                parts = content.get("parts", [])
+                    first_candidate = candidates[0]
+                    content = first_candidate.get("content", {})
+                    parts = content.get("parts", [])
 
-                executed_tools = []
-                tool_results = []
-                for part in parts:
-                    if "functionCall" in part:
-                        fc = part["functionCall"]
-                        fn_name = fc.get("name")
-                        fn_args = fc.get("args", {})
-                        executed_tools.append({"name": fn_name, "args": fn_args})
+                    executed_tools = []
+                    tool_results = []
+                    for part in parts:
+                        if "functionCall" in part:
+                            fc = part["functionCall"]
+                            fn_name = fc.get("name")
+                            fn_args = fc.get("args", {})
+                            executed_tools.append({"name": fn_name, "args": fn_args})
+                            
+                            tool_res = await self.execute_tool(fn_name, fn_args)
+                            tool_results.append({
+                                "name": fn_name,
+                                "response": {"name": fn_name, "content": tool_res}
+                            })
+
+                    if tool_results:
+                        contents.append(content)
+                        tool_parts = []
+                        for tr in tool_results:
+                            tool_parts.append({
+                                "functionResponse": {
+                                    "name": tr["name"],
+                                    "response": tr["response"]
+                                }
+                            })
+                        contents.append({"role": "function", "parts": tool_parts})
+
+                        followup_resp = await client.post(endpoint, json={
+                            "contents": contents,
+                            "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
+                            "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024}
+                        })
                         
-                        tool_res = await self.execute_tool(fn_name, fn_args)
-                        tool_results.append({
-                            "name": fn_name,
-                            "response": {"name": fn_name, "content": tool_res}
-                        })
+                        if followup_resp.status_code == 200:
+                            followup_data = followup_resp.json()
+                            f_candidates = followup_data.get("candidates", [])
+                            if f_candidates:
+                                f_text = "".join([p.get("text", "") for p in f_candidates[0].get("content", {}).get("parts", [])])
+                                return {
+                                    "response": f_text,
+                                    "tool_calls": executed_tools,
+                                    "tool_results": tool_results,
+                                    "grounding_data": tool_results[0]["response"] if tool_results else None,
+                                    "model": model_name
+                                }
 
-                if tool_results:
-                    contents.append(content)
-                    tool_parts = []
-                    for tr in tool_results:
-                        tool_parts.append({
-                            "functionResponse": {
-                                "name": tr["name"],
-                                "response": tr["response"]
-                            }
-                        })
-                    contents.append({"role": "function", "parts": tool_parts})
+                    text_response = "".join([p.get("text", "") for p in parts if "text" in p])
+                    if text_response:
+                        return {
+                            "response": text_response,
+                            "tool_calls": executed_tools,
+                            "grounding_data": None,
+                            "model": model_name
+                        }
 
-                    followup_resp = await client.post(endpoint, json={
-                        "contents": contents,
-                        "system_instruction": {"parts": [{"text": SYSTEM_INSTRUCTION}]},
-                        "generationConfig": {"temperature": 0.2, "maxOutputTokens": 1024}
-                    })
-                    
-                    if followup_resp.status_code == 200:
-                        followup_data = followup_resp.json()
-                        f_candidates = followup_data.get("candidates", [])
-                        if f_candidates:
-                            f_text = "".join([p.get("text", "") for p in f_candidates[0].get("content", {}).get("parts", [])])
-                            return {
-                                "response": f_text,
-                                "tool_calls": executed_tools,
-                                "tool_results": tool_results,
-                                "grounding_data": tool_results[0]["response"] if tool_results else None,
-                                "model": "gemini-1.5-flash"
-                            }
+                except Exception as ex:
+                    print(f"[Gemini {model_name}] Exception during API call: {ex}")
+                    continue
 
-                text_response = "".join([p.get("text", "") for p in parts if "text" in p])
-                return {
-                    "response": text_response or "I have analyzed the available environmental parameters.",
-                    "tool_calls": executed_tools,
-                    "grounding_data": None,
-                    "model": "gemini-1.5-flash"
-                }
-
-            except Exception as e:
-                print(f"[Gemini] Exception during API call: {e}")
-                return await self._deterministic_reasoning(clean_prompt, location_hint)
+        return await self._deterministic_reasoning(clean_prompt, location_hint)
 
 ai_service = AIService()

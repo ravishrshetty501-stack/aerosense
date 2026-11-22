@@ -22,10 +22,16 @@ export default defineConfig({
   build: {
     rollupOptions: {
       output: {
-        manualChunks: {
-          maplibre: ['maplibre-gl'],
-          recharts: ['recharts'],
-          reactVendor: ['react', 'react-dom'],
+        manualChunks(id) {
+          if (id.includes('node_modules/maplibre-gl')) {
+            return 'maplibre';
+          }
+          if (id.includes('node_modules/recharts') || id.includes('node_modules/d3-')) {
+            return 'recharts';
+          }
+          if (id.includes('node_modules/react') || id.includes('node_modules/react-dom') || id.includes('node_modules/scheduler')) {
+            return 'react-vendor';
+          }
         },
       },
     },
