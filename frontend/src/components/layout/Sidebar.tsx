@@ -91,7 +91,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
           <button
             onClick={() => setCollapsed(!collapsed)}
             title={collapsed ? 'Expand Navigation' : 'Collapse Navigation'}
-            className="p-1 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text rounded hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle transition-colors ml-auto"
+            aria-label={collapsed ? 'Expand Navigation Sidebar' : 'Collapse Navigation Sidebar'}
+            className="p-1 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text rounded hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle transition-colors ml-auto focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
           >
             {collapsed ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronLeft className="w-3.5 h-3.5" />}
           </button>
@@ -105,7 +106,9 @@ export const Sidebar: React.FC<SidebarProps> = ({ currentTab, onSelectTab }) => 
               key={item.id}
               onClick={() => onSelectTab(item.id)}
               title={collapsed ? item.label : undefined}
-              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all ${
+              aria-label={item.label}
+              aria-current={isActive ? 'page' : undefined}
+              className={`w-full flex items-center space-x-2.5 px-3 py-2 rounded-lg text-xs font-medium transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent ${
                 isActive
                   ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-accent dark:text-darkAtlas-accent font-semibold border-l-2 border-atlas-accent dark:border-darkAtlas-accent shadow-sm'
                   : 'text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text hover:bg-atlas-subtle/50 dark:hover:bg-darkAtlas-subtle/50'

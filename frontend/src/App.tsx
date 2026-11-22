@@ -1,20 +1,47 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { AuthProvider } from './context/AuthContext';
 import { AQIProvider } from './context/AQIContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { Navbar } from './components/layout/Navbar';
 import { Sidebar, NavTab } from './components/layout/Sidebar';
 import { MobileNav } from './components/layout/MobileNav';
-import { OverviewDashboard } from './components/dashboard/OverviewDashboard';
-import { GlobalPollutionMap } from './components/map/GlobalPollutionMap';
-import { AnalyticsView } from './components/analytics/AnalyticsView';
-import { AIAssistantView } from './components/ai/AIAssistantView';
-import { CityComparisonView } from './components/compare/CityComparisonView';
-import { HealthAdvisorView } from './components/advisor/HealthAdvisorView';
-import { ReportsView } from './components/reports/ReportsView';
-import { AlertsView } from './components/alerts/AlertsView';
 import { AuthModal } from './components/auth/AuthModal';
-import { WifiOff } from 'lucide-react';
+import { WifiOff, Loader2 } from 'lucide-react';
+
+// Dynamic code-splitting for high-performance lazy view loading
+const OverviewDashboard = lazy(() =>
+  import('./components/dashboard/OverviewDashboard').then((m) => ({ default: m.OverviewDashboard }))
+);
+const GlobalPollutionMap = lazy(() =>
+  import('./components/map/GlobalPollutionMap').then((m) => ({ default: m.GlobalPollutionMap }))
+);
+const AnalyticsView = lazy(() =>
+  import('./components/analytics/AnalyticsView').then((m) => ({ default: m.AnalyticsView }))
+);
+const AIAssistantView = lazy(() =>
+  import('./components/ai/AIAssistantView').then((m) => ({ default: m.AIAssistantView }))
+);
+const CityComparisonView = lazy(() =>
+  import('./components/compare/CityComparisonView').then((m) => ({ default: m.CityComparisonView }))
+);
+const HealthAdvisorView = lazy(() =>
+  import('./components/advisor/HealthAdvisorView').then((m) => ({ default: m.HealthAdvisorView }))
+);
+const ReportsView = lazy(() =>
+  import('./components/reports/ReportsView').then((m) => ({ default: m.ReportsView }))
+);
+const AlertsView = lazy(() =>
+  import('./components/alerts/AlertsView').then((m) => ({ default: m.AlertsView }))
+);
+
+const ViewLoadingFallback: React.FC = () => (
+  <div className="flex flex-col items-center justify-center min-h-[45vh] space-y-3 font-sans" role="status" aria-live="polite">
+    <Loader2 className="w-6 h-6 text-atlas-accent dark:text-darkAtlas-accent animate-spin" />
+    <span className="text-xs text-atlas-muted dark:text-darkAtlas-muted font-mono tracking-wider">
+      Loading workspace view...
+    </span>
+  </div>
+);
 
 const AppContent: React.FC = () => {
   const [currentTab, setCurrentTab] = useState<NavTab>('map'); // Default to Global Map per scientific exploration vision
@@ -53,19 +80,21 @@ const AppContent: React.FC = () => {
 
         {/* Content View Area */}
         <main className={`flex-1 overflow-y-auto mb-14 md:mb-0 ${currentTab === 'map' ? 'p-0 overflow-hidden' : 'p-4 sm:p-6 lg:p-8'}`}>
-          {currentTab === 'dashboard' && (
-            <OverviewDashboard
-              onNavigateToMap={() => setCurrentTab('map')}
-              onNavigateToAlerts={() => setCurrentTab('alerts')}
-            />
-          )}
-          {currentTab === 'map' && <GlobalPollutionMap />}
-          {currentTab === 'analytics' && <AnalyticsView />}
-          {currentTab === 'ai' && <AIAssistantView />}
-          {currentTab === 'compare' && <CityComparisonView />}
-          {currentTab === 'advisor' && <HealthAdvisorView />}
-          {currentTab === 'reports' && <ReportsView />}
-          {currentTab === 'alerts' && <AlertsView />}
+          <Suspense fallback={<ViewLoadingFallback />}>
+            {currentTab === 'dashboard' && (
+              <OverviewDashboard
+                onNavigateToMap={() => setCurrentTab('map')}
+                onNavigateToAlerts={() => setCurrentTab('alerts')}
+              />
+            )}
+            {currentTab === 'map' && <GlobalPollutionMap />}
+            {currentTab === 'analytics' && <AnalyticsView />}
+            {currentTab === 'ai' && <AIAssistantView />}
+            {currentTab === 'compare' && <CityComparisonView />}
+            {currentTab === 'advisor' && <HealthAdvisorView />}
+            {currentTab === 'reports' && <ReportsView />}
+            {currentTab === 'alerts' && <AlertsView />}
+          </Suspense>
         </main>
       </div>
 

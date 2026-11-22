@@ -4,10 +4,11 @@ from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_service import ai_service
 from app.api.deps import get_current_user_optional
 from app.models.user import User
+from app.core.rate_limit import ai_chat_limiter
 
 router = APIRouter(prefix="/ai", tags=["GenAI Assistant"])
 
-@router.post("/chat", response_model=ChatResponse)
+@router.post("/chat", response_model=ChatResponse, dependencies=[Depends(ai_chat_limiter)])
 async def chat_with_assistant(
     request: ChatRequest,
     current_user: User = Depends(get_current_user_optional)

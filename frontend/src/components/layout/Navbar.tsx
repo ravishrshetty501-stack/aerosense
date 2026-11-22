@@ -114,10 +114,11 @@ export const Navbar: React.FC = () => {
           <input
             type="text"
             placeholder="Search global city, coordinates or monitoring station..."
+            aria-label="Search global city, coordinates or monitoring station"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             onFocus={() => searchQuery.length >= 2 && setShowDropdown(true)}
-            className="w-full bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-lg py-1.5 pl-8 pr-8 text-xs text-atlas-text dark:text-darkAtlas-text placeholder-atlas-muted dark:placeholder-darkAtlas-muted focus:outline-none focus:border-atlas-accent dark:focus:border-darkAtlas-accent transition-colors"
+            className="w-full bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-lg py-1.5 pl-8 pr-8 text-xs text-atlas-text dark:text-darkAtlas-text placeholder-atlas-muted dark:placeholder-darkAtlas-muted focus:outline-none focus:border-atlas-accent dark:focus:border-darkAtlas-accent focus-visible:ring-1 focus-visible:ring-atlas-accent transition-colors"
           />
           {searchQuery && (
             <button
@@ -125,7 +126,8 @@ export const Navbar: React.FC = () => {
                 setSearchQuery('');
                 setSearchResults([]);
               }}
-              className="absolute right-7 top-1/2 -translate-y-1/2 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text p-0.5"
+              aria-label="Clear search query"
+              className="absolute right-7 top-1/2 -translate-y-1/2 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text p-0.5 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
             >
               <X className="w-3 h-3" />
             </button>
@@ -172,7 +174,9 @@ export const Navbar: React.FC = () => {
               <button
                 key={std}
                 onClick={() => setStandard(std)}
-                className={`px-2.5 py-1 rounded-md font-sans transition-all ${
+                aria-label={`Select ${std.replace('_', ' ')} standard`}
+                aria-pressed={isSelected}
+                className={`px-2.5 py-1 rounded-md font-sans transition-all focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent ${
                   isSelected
                     ? 'bg-atlas-surface dark:bg-darkAtlas-surface text-atlas-accent dark:text-darkAtlas-accent font-semibold shadow-sm'
                     : 'text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text'
@@ -189,7 +193,10 @@ export const Navbar: React.FC = () => {
           <button
             onClick={() => setShowThemeMenu(!showThemeMenu)}
             title={`Theme: ${theme.toUpperCase()} (Click to change)`}
-            className="p-1.5 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle rounded-lg border border-atlas-border dark:border-darkAtlas-border transition-colors flex items-center space-x-1"
+            aria-label={`Display theme selector, currently ${theme}`}
+            aria-expanded={showThemeMenu}
+            aria-haspopup="true"
+            className="p-1.5 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-text dark:hover:text-darkAtlas-text hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle rounded-lg border border-atlas-border dark:border-darkAtlas-border transition-colors flex items-center space-x-1 focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
           >
             {theme === 'system' ? (
               <Laptop className="w-3.5 h-3.5" />
@@ -202,10 +209,11 @@ export const Navbar: React.FC = () => {
           </button>
 
           {showThemeMenu && (
-            <div className="absolute right-0 mt-1 w-32 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-lg shadow-floating dark:shadow-floating-dark py-1 z-50 text-xs font-sans">
+            <div className="absolute right-0 mt-1 w-32 bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-lg shadow-floating dark:shadow-floating-dark py-1 z-50 text-xs font-sans" role="menu">
               {(['light', 'dark', 'system'] as ThemeMode[]).map((t) => (
                 <button
                   key={t}
+                  role="menuitem"
                   onClick={() => {
                     setTheme(t);
                     setShowThemeMenu(false);
@@ -231,7 +239,8 @@ export const Navbar: React.FC = () => {
           onClick={refreshData}
           disabled={loading}
           title="Refresh Atmospheric Telemetry"
-          className="p-1.5 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-accent dark:hover:text-darkAtlas-accent hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle rounded-lg border border-atlas-border dark:border-darkAtlas-border transition-colors"
+          aria-label="Refresh atmospheric telemetry"
+          className="p-1.5 text-atlas-muted dark:text-darkAtlas-muted hover:text-atlas-accent dark:hover:text-darkAtlas-accent hover:bg-atlas-subtle dark:hover:bg-darkAtlas-subtle rounded-lg border border-atlas-border dark:border-darkAtlas-border transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-atlas-accent dark:text-darkAtlas-accent' : ''}`} />
         </button>
@@ -242,7 +251,8 @@ export const Navbar: React.FC = () => {
             <button
               onClick={logout}
               title={`Signed in as ${user.email} (Click to Logout)`}
-              className="flex items-center space-x-1.5 px-2.5 py-1 bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-lg text-xs font-medium text-atlas-text dark:text-darkAtlas-text"
+              aria-label={`Signed in as ${user.email}. Click to log out.`}
+              className="flex items-center space-x-1.5 px-2.5 py-1 bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-lg text-xs font-medium text-atlas-text dark:text-darkAtlas-text focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
             >
               <UserIcon className="w-3 h-3 text-atlas-accent dark:text-darkAtlas-accent" />
               <span className="hidden lg:inline">{user.full_name || user.email.split('@')[0]}</span>
@@ -251,7 +261,8 @@ export const Navbar: React.FC = () => {
         ) : (
           <button
             onClick={openAuthModal}
-            className="px-2.5 py-1 bg-atlas-accent dark:bg-darkAtlas-accent text-white dark:text-darkAtlas-bg text-xs font-medium rounded-lg transition-colors flex items-center space-x-1 shadow-sm"
+            aria-label="Sign in to analyst workstation"
+            className="px-2.5 py-1 bg-atlas-accent dark:bg-darkAtlas-accent text-white dark:text-darkAtlas-bg text-xs font-medium rounded-lg transition-colors flex items-center space-x-1 shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-atlas-accent"
           >
             <UserIcon className="w-3 h-3" />
             <span className="hidden sm:inline">Sign In</span>

@@ -27,7 +27,7 @@ describe('AeroSense AI Frontend Smoke Tests', () => {
   });
 
   it('verifies data provider distinction logic', () => {
-    const groundReading = { type: 'ground_observation', provider: 'OpenAQ' };
+    const groundReading = { type: 'ground_observation', provider: 'WAQI Ground Sensor' };
     const modelReading = { type: 'model_estimate', provider: 'Open-Meteo CAMS' };
 
     expect(groundReading.type).toBe('ground_observation');

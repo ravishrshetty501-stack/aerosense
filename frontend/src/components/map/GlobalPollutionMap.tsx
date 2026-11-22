@@ -481,28 +481,32 @@ export const GlobalPollutionMap: React.FC = () => {
           <button
             onClick={handleZoomIn}
             title="Zoom In"
-            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors"
+            aria-label="Zoom in map"
+            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
           >
             <Plus className="w-4 h-4" />
           </button>
           <button
             onClick={handleZoomOut}
             title="Zoom Out"
-            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors"
+            aria-label="Zoom out map"
+            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
           >
             <Minus className="w-4 h-4" />
           </button>
           <button
             onClick={handleResetPosition}
             title="Reset Map Position"
-            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors"
+            aria-label="Reset map position to active city"
+            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
           >
             <RotateCcw className="w-4 h-4" />
           </button>
           <button
             onClick={handleLocateUser}
             title="My Coordinates"
-            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors"
+            aria-label="Locate my coordinates"
+            className="p-2 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle rounded-md transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
           >
             <Navigation className="w-4 h-4" />
           </button>
@@ -526,7 +530,8 @@ export const GlobalPollutionMap: React.FC = () => {
             </span>
             <button
               onClick={() => setSelectedStation(null)}
-              className="text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text text-xs p-1"
+              aria-label="Close station inspector"
+              className="text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text text-xs p-1 rounded focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
             >
               ✕
             </button>
@@ -595,7 +600,8 @@ export const GlobalPollutionMap: React.FC = () => {
             <div className="flex items-center space-x-2">
               <button
                 onClick={() => setIsPlaying(!isPlaying)}
-                className="flex items-center space-x-1 px-2.5 py-1 bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg font-medium text-[11px] rounded-md transition-colors shadow-sm"
+                aria-label={isPlaying ? 'Pause 24-hour temporal playback animation' : 'Play 24-hour temporal playback animation'}
+                className="flex items-center space-x-1 px-2.5 py-1 bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg font-medium text-[11px] rounded-md transition-colors shadow-sm focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
               >
                 {isPlaying ? <Pause className="w-3 h-3" /> : <Play className="w-3 h-3" />}
                 <span>{isPlaying ? 'Pause' : 'Play'}</span>
@@ -603,8 +609,10 @@ export const GlobalPollutionMap: React.FC = () => {
 
               <button
                 onClick={() => setBottomWorkspaceOpen(!bottomWorkspaceOpen)}
-                className="p-1 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text rounded transition-colors"
-                title={bottomWorkspaceOpen ? 'Collapse' : 'Expand'}
+                className="p-1 text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text rounded transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-clima-accent"
+                title={bottomWorkspaceOpen ? 'Collapse Temporal Workspace' : 'Expand Temporal Workspace'}
+                aria-label={bottomWorkspaceOpen ? 'Collapse Temporal Workspace' : 'Expand Temporal Workspace'}
+                aria-expanded={bottomWorkspaceOpen}
               >
                 {bottomWorkspaceOpen ? <ChevronDown className="w-4 h-4" /> : <ChevronUp className="w-4 h-4" />}
               </button>
