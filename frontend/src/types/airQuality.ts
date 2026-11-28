@@ -9,6 +9,13 @@ export interface NormalizedMeasurement {
   data_quality: string;
   observation_timestamp: string;
   retrieval_timestamp: string;
+  original_value?: number | null;
+  original_unit?: string | null;
+  averaging_period?: string | null;
+  data_origin?: 'measured' | 'model_derived' | 'provider_index' | 'unavailable' | string | null;
+  provider_aqi_subindex?: number | null;
+  conversion_method?: string | null;
+  conversion_assumption?: string | null;
 }
 
 export interface LocationInfo {
@@ -22,26 +29,34 @@ export interface LocationInfo {
 
 export interface AQIStandardResult {
   standard: string;
+  methodology_version?: string;
   aqi: number | null;
   band?: number;
   category: string;
   dominant_pollutant: string | null;
   color: string;
   subindices: Record<string, number>;
+  diagnostic_subindices?: Record<string, number>;
   advisory: string;
   is_reliable: boolean;
+  is_methodology_eligible?: boolean;
+  is_formula_only?: boolean;
+  is_regulatory_compliant?: boolean;
+  calculation_basis?: string;
+  ozone_selection_basis?: string | null;
   standard_note?: string;
 }
 
 export interface HourlyTrendPoint {
   time: string;
-  pm25?: number;
-  pm10?: number;
-  no2?: number;
-  o3?: number;
-  us_aqi?: number;
+  pm25?: number | null;
+  pm10?: number | null;
+  no2?: number | null;
+  o3?: number | null;
+  us_aqi?: number | null;
   is_forecast: boolean;
   type: string;
+  is_synthesized?: boolean;
 }
 
 export interface AirQualityResponse {
@@ -50,10 +65,11 @@ export interface AirQualityResponse {
   aqi_standard_results: Record<string, AQIStandardResult>;
   dominant_pollutant: string | null;
   weather_context?: {
-    elevation?: number;
-    provider_us_aqi?: number;
-    provider_european_aqi?: number;
+    elevation?: number | null;
+    provider_us_aqi?: number | null;
+    provider_european_aqi?: number | null;
   };
+  provider_indices?: Record<string, unknown> | null;
   hourly_history: HourlyTrendPoint[];
   forecast: HourlyTrendPoint[];
   primary_source: string;

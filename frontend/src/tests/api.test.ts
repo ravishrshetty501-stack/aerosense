@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { api } from '../services/api';
+import { openReportPdf } from '../components/reports/ReportsView';
 
 describe('AeroSense AI Frontend API Service Client Tests', () => {
   beforeEach(() => {
@@ -134,5 +135,84 @@ describe('AeroSense AI Frontend API Service Client Tests', () => {
     const parsedBody = JSON.parse(capturedBody);
     expect(parsedBody.email).toBe('newuser@aerosense.ai');
     expect(parsedBody.preferred_standard).toBe('INDIA_CPCB');
+  });
+
+  it('handles missing city in getReportPdfUrl and enforces noopener,noreferrer when opening PDFs', () => {
+    expect(api.getReportPdfUrl('', 'Daily Summary', 'US_EPA')).toBe('');
+    expect(api.getReportPdfUrl('   ', 'Daily Summary', 'US_EPA')).toBe('');
+
+    const validUrl = api.getReportPdfUrl('Tokyo', 'Daily Summary', 'US_EPA');
+    expect(validUrl).toBe('/api/v1/reports/export/pdf?city=Tokyo&period=Daily%20Summary&standard=US_EPA');
+
+    const openSpy = vi.fn().mockReturnValue(null);
+    const okResult = openReportPdf(validUrl, openSpy);
+    expect(openSpy).toHaveBeenCalledWith(validUrl, '_blank', 'noopener,noreferrer');
+    expect(okResult).toEqual({ opened: true, error: null });
+
+    // Missing or non-http/relative URLs fail cleanly without invoking window.open
+    const neverCalled = vi.fn();
+    const emptyOutcome = openReportPdf('', neverCalled);
+    expect(emptyOutcome.opened).toBe(false);
+    expect(emptyOutcome.error).toBeTruthy();
+    expect(neverCalled).not.toHaveBeenCalled();
+
+    const unsafeSchemeOutcome = openReportPdf('javascript:alert(1)', neverCalled);
+    expect(unsafeSchemeOutcome.opened).toBe(false);
+    expect(unsafeSchemeOutcome.error).toBeTruthy();
+    expect(neverCalled).not.toHaveBeenCalled();
+
+    // Thrown window.open error is caught and reported cleanly
+    const throwingOpen = vi.fn().mockImplementation(() => {
+      throw new Error('Blocked');
+    });
+    const failedOutcome = openReportPdf(validUrl, throwingOpen);
+    expect(failedOutcome.opened).toBe(false);
+    expect(failedOutcome.error).toBeTruthy();
+  });
+
+  it('throws an error when deleteAlertRule receives a non-OK HTTP response', async () => {
+    global.fetch = vi.fn().mockImplementation(() => {
+      return Promise.resolve({
+        ok: false,
+        status: 500,
+      } as Response);
+    });
+
+    await expect(api.deleteAlertRule('rule-123')).rejects.toThrow('Failed to delete alert rule');
+  });
+
+  it('throws descriptive errors on non-OK alert fetches, non-JSON login errors, and forwards signal in compareCities', async () => {
+    global.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 401,
+        json: async () => ({ detail: 'Unauthorized' }),
+      } as Response)
+    );
+    await expect(api.getAlertRules()).rejects.toThrow('Unauthorized');
+    await expect(api.getAlertEvents()).rejects.toThrow('Unauthorized');
+
+    global.fetch = vi.fn().mockImplementation(() =>
+      Promise.resolve({
+        ok: false,
+        status: 502,
+        json: async () => {
+          throw new SyntaxError('Unexpected token <');
+        },
+      } as unknown as Response)
+    );
+    await expect(api.login('user@aerosense.ai', 'pass')).rejects.toThrow('Login failed (HTTP 502)');
+
+    let capturedInit: RequestInit | undefined;
+    global.fetch = vi.fn().mockImplementation((_url: string, init?: RequestInit) => {
+      capturedInit = init;
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ standard: 'US_EPA', comparison: [] }),
+      } as Response);
+    });
+    const controller = new AbortController();
+    await api.compareCities(['Tokyo', 'London'], 'US_EPA', { signal: controller.signal });
+    expect(capturedInit?.signal).toBe(controller.signal);
   });
 });

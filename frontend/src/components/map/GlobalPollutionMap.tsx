@@ -3,55 +3,373 @@ import maplibregl from 'maplibre-gl';
 import { useAQI } from '../../context/AQIContext';
 import { useTheme } from '../../context/ThemeContext';
 import { api } from '../../services/api';
-import { MonitoringStation } from '../../types/airQuality';
+import { AirQualityResponse, HourlyTrendPoint, MonitoringStation, NormalizedMeasurement } from '../../types/airQuality';
+import { getAqiScaleColor, resolveForecastAqi } from '../../utils/airQualityHelpers';
 import {
-  Layers,
-  MapPin,
   Radio,
-  Compass,
-  RefreshCw,
-  Filter,
   ShieldCheck,
   ChevronDown,
   ChevronUp,
-  Maximize2,
-  Minimize2,
   Navigation,
   Play,
   Pause,
   BarChart2,
-  Sliders,
-  Eye,
-  EyeOff,
-  Check,
   Plus,
   Minus,
   RotateCcw,
-  Globe2
 } from 'lucide-react';
 
-type PollutantVariable = 'pm25' | 'pm10' | 'no2' | 'so2' | 'co' | 'o3';
-type AqiTier = 'all' | 'good' | 'moderate' | 'poor' | 'severe';
-type TemporalStep = 'hourly' | 'daily' | '72h';
+export type AqiTier = 'all' | 'good' | 'moderate' | 'poor' | 'severe';
+export type TemporalStep = 'hourly' | 'daily' | '72h';
+
+/**
+ * Filters monitoring stations by AQI severity tier without fabricating a fallback for null/missing AQI.
+ */
+export function filterStationsByAqiTier(stations: MonitoringStation[], tier: AqiTier): MonitoringStation[] {
+  if (tier === 'all') return stations;
+  return stations.filter((st) => {
+    const val = st.aqi;
+    if (typeof val !== 'number' || !Number.isFinite(val)) {
+      return false;
+    }
+    if (tier === 'good') return val <= 50;
+    if (tier === 'moderate') return val > 50 && val <= 100;
+    if (tier === 'poor') return val > 100 && val <= 150;
+    if (tier === 'severe') return val > 150;
+    return true;
+  });
+}
+
+const ONE_HOUR_MS = 60 * 60 * 1000;
+const DAY_MS = 24 * ONE_HOUR_MS;
+
+function parseTimestampMs(timeStr: unknown): number | null {
+  if (typeof timeStr !== 'string' || !timeStr.trim()) return null;
+  const ms = Date.parse(timeStr);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function isValidMeasurementValue(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
+
+interface ParsedForecastEntry {
+  pt: HourlyTrendPoint;
+  ms: number;
+  origIdx: number;
+  resolvedAqi: number | null;
+}
+
+/**
+ * Selects timeline points from real forecast series after chronological sorting and timestamp deduplication,
+ * producing labels that accurately reflect observation counts and elapsed timestamp spans.
+ */
+export function selectTemporalTimelinePoints(
+  forecast: HourlyTrendPoint[] | null | undefined,
+  step: TemporalStep
+): { points: HourlyTrendPoint[]; label: string } {
+  const safeForecast = Array.isArray(forecast) ? forecast : [];
+  if (safeForecast.length === 0) {
+    return {
+      points: [],
+      label: step === 'daily' ? 'Daily Snapshots Unavailable' : 'Forecast Unavailable',
+    };
+  }
+
+  const parsedEntries: ParsedForecastEntry[] = [];
+  safeForecast.forEach((pt, origIdx) => {
+    const ms = parseTimestampMs(pt?.time);
+    if (ms !== null) {
+      parsedEntries.push({
+        pt,
+        ms,
+        origIdx,
+        resolvedAqi: resolveForecastAqi(pt),
+      });
+    }
+  });
+
+  if (parsedEntries.length === 0) {
+    const fallbackPoints = safeForecast.slice(0, 24);
+    const validCount = fallbackPoints.filter((pt) => resolveForecastAqi(pt) !== null).length;
+    return {
+      points: fallbackPoints,
+      label:
+        validCount === 0
+          ? step === 'daily'
+            ? 'Daily Snapshots Unavailable'
+            : 'Forecast Unavailable'
+          : `${step === 'daily' ? 'Daily Snapshots' : 'Forecast'} (${validCount} valid pts, unverified timestamps)`,
+    };
+  }
+
+  // Sort chronologically while preserving original relative order on equal timestamps
+  parsedEntries.sort((a, b) => (a.ms !== b.ms ? a.ms - b.ms : a.origIdx - b.origIdx));
+
+  // Deduplicate equal timestamps: prefer first valid AQI entry; otherwise retain one unavailable entry
+  const dedupedByTimestamp = new Map<number, ParsedForecastEntry>();
+  for (const entry of parsedEntries) {
+    const existing = dedupedByTimestamp.get(entry.ms);
+    if (!existing) {
+      dedupedByTimestamp.set(entry.ms, entry);
+    } else if (existing.resolvedAqi === null && entry.resolvedAqi !== null) {
+      dedupedByTimestamp.set(entry.ms, entry);
+    }
+  }
+  const deduped = Array.from(dedupedByTimestamp.values());
+  const t0 = deduped[0].ms;
+
+  if (step === 'daily') {
+    const selected: ParsedForecastEntry[] = [];
+    const seenBuckets = new Set<number>();
+    for (const item of deduped) {
+      if (item.ms - t0 > 72 * ONE_HOUR_MS) break;
+      const dayBucket = Math.floor((item.ms - t0) / DAY_MS);
+      if (dayBucket >= 3) break;
+      if (!seenBuckets.has(dayBucket)) {
+        seenBuckets.add(dayBucket);
+        selected.push(item);
+      }
+    }
+    const points = selected.map((s) => s.pt);
+    const validSelected = selected.filter((s) => s.resolvedAqi !== null);
+    if (validSelected.length === 0) {
+      return { points, label: 'Daily Snapshots Unavailable' };
+    }
+    if (validSelected.length === 1) {
+      return { points, label: 'Daily Forecast Snapshot (Single point)' };
+    }
+    const spanHours = Math.round((validSelected[validSelected.length - 1].ms - validSelected[0].ms) / ONE_HOUR_MS);
+    const countLabel =
+      validSelected.length < points.length
+        ? `${validSelected.length} of ${points.length} valid`
+        : `${validSelected.length} pts`;
+    return {
+      points,
+      label: `Daily Forecast Snapshots (${countLabel}, ${spanHours}h span)`,
+    };
+  }
+
+  if (step === '72h') {
+    const selected: ParsedForecastEntry[] = [];
+    for (const item of deduped) {
+      if (item.ms - t0 > 72 * ONE_HOUR_MS) break;
+      if (selected.length === 0 || item.ms - selected[selected.length - 1].ms >= 3 * ONE_HOUR_MS) {
+        selected.push(item);
+        if (selected.length === 24) break;
+      }
+    }
+    const points = selected.map((s) => s.pt);
+    const validSelected = selected.filter((s) => s.resolvedAqi !== null);
+    if (validSelected.length === 0) {
+      return { points, label: 'Forecast Unavailable' };
+    }
+    if (validSelected.length === 1) {
+      return { points, label: 'Forecast Snapshot (Single point)' };
+    }
+    const spanHours = Math.round((validSelected[validSelected.length - 1].ms - validSelected[0].ms) / ONE_HOUR_MS);
+    const allPointsValid = validSelected.length === selected.length;
+    const isUniform3hStep =
+      allPointsValid &&
+      selected.every((item, idx) => idx === 0 || item.ms - selected[idx - 1].ms === 3 * ONE_HOUR_MS);
+    const cadenceLabel = isUniform3hStep ? '3h Step' : 'Irregular / Partial Step';
+    return {
+      points,
+      label: `${spanHours}h Forecast Trajectory (${cadenceLabel})`,
+    };
+  }
+
+  // step === 'hourly'
+  const selected = deduped
+    .filter((item) => item.ms - t0 <= 23 * ONE_HOUR_MS)
+    .slice(0, 24);
+  const points = selected.map((s) => s.pt);
+  const validSelected = selected.filter((s) => s.resolvedAqi !== null);
+
+  if (validSelected.length === 0) {
+    return { points, label: 'Forecast Unavailable' };
+  }
+  const allPointsValid = validSelected.length === selected.length;
+  const isContiguousHourly =
+    allPointsValid &&
+    selected.every((item, idx) => idx === 0 || item.ms - selected[idx - 1].ms === ONE_HOUR_MS);
+
+  if (isContiguousHourly) {
+    if (selected.length === 1) {
+      return { points, label: 'Hourly Forecast Snapshot (1 pt)' };
+    }
+    const spanHours = Math.round((selected[selected.length - 1].ms - selected[0].ms) / ONE_HOUR_MS);
+    return {
+      points,
+      label: `Hourly Forecast (${selected.length} pts, ${spanHours}h span)`,
+    };
+  }
+  if (validSelected.length === 1) {
+    return { points, label: 'Hourly Forecast (1 valid pt, gaps detected)' };
+  }
+  const validSpanHours = Math.round(
+    (validSelected[validSelected.length - 1].ms - validSelected[0].ms) / ONE_HOUR_MS
+  );
+  return {
+    points,
+    label: `Hourly Forecast (${validSelected.length} valid pts, ${validSpanHours}h span, gaps detected)`,
+  };
+}
+
+/**
+ * Derives verified telemetry status metrics without fabricating unavailable model estimates or active streams.
+ */
+export function buildMapTelemetrySummary(airQuality: AirQualityResponse | null): {
+  dominantPollutant: string;
+  observationMode: string;
+  forecastStatus: string;
+} {
+  if (!airQuality) {
+    return {
+      dominantPollutant: 'Unavailable',
+      observationMode: 'Unavailable',
+      forecastStatus: 'Unavailable',
+    };
+  }
+
+  const validMeasurements = Object.values(airQuality.measurements || {}).filter(
+    (m): m is NormalizedMeasurement => Boolean(m) && isValidMeasurementValue(m.value)
+  );
+  const hasGroundMeasurement = validMeasurements.some(
+    (m) => m.measurement_type === 'ground_observation'
+  );
+  const hasModelMeasurement = validMeasurements.some(
+    (m) => m.measurement_type === 'model_estimate'
+  );
+
+  let observationMode = 'Unavailable';
+  if (hasGroundMeasurement) {
+    observationMode = 'Ground Sensor';
+  } else if (hasModelMeasurement) {
+    observationMode = 'Model Estimate';
+  }
+
+  const hasValidForecast =
+    Array.isArray(airQuality.forecast) &&
+    airQuality.forecast.some(
+      (pt) =>
+        resolveForecastAqi(pt) !== null ||
+        isValidMeasurementValue(pt?.pm25) ||
+        isValidMeasurementValue(pt?.pm10) ||
+        isValidMeasurementValue(pt?.no2) ||
+        isValidMeasurementValue(pt?.o3)
+    );
+
+  return {
+    dominantPollutant: airQuality.dominant_pollutant || 'Unavailable',
+    observationMode,
+    forecastStatus: hasValidForecast ? 'Active' : 'Unavailable',
+  };
+}
+
+/**
+ * Safely constructs the geographical focus popup DOM element without HTML interpolation,
+ * using theme CSS variables so text remains readable in both light and dark modes.
+ */
+export function buildCityPopupElement(
+  cityName: string,
+  latitude: number,
+  longitude: number,
+  doc: Document = document
+): HTMLElement {
+  const container = doc.createElement('div');
+  container.style.fontSize = '11px';
+
+  const titleEl = doc.createElement('div');
+  titleEl.style.color = 'var(--accent-primary, #087F73)';
+  titleEl.style.fontWeight = '700';
+  titleEl.textContent = cityName;
+
+  const subtitleEl = doc.createElement('div');
+  subtitleEl.style.color = 'var(--text-secondary, #687771)';
+  subtitleEl.style.fontSize = '10px';
+  subtitleEl.textContent = 'Geographical Focus Location';
+
+  const coordsEl = doc.createElement('div');
+  coordsEl.style.color = 'var(--text-primary, #172522)';
+  coordsEl.style.fontFamily = 'monospace';
+  coordsEl.style.fontSize = '10px';
+  coordsEl.style.marginTop = '3px';
+  coordsEl.textContent = `${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`;
+
+  container.appendChild(titleEl);
+  container.appendChild(subtitleEl);
+  container.appendChild(coordsEl);
+  return container;
+}
+
+/**
+ * Safely constructs a monitoring station popup DOM element without HTML interpolation,
+ * using theme CSS variables for light and dark theme readability.
+ */
+export function buildStationPopupElement(
+  station: Pick<MonitoringStation, 'name' | 'aqi' | 'provider'>,
+  color: string,
+  doc: Document = document
+): HTMLElement {
+  const container = doc.createElement('div');
+  container.style.fontSize = '11px';
+  container.style.maxWidth = '200px';
+
+  const headerEl = doc.createElement('div');
+  headerEl.style.display = 'flex';
+  headerEl.style.alignItems = 'center';
+  headerEl.style.justifyContent = 'space-between';
+  headerEl.style.marginBottom = '2px';
+
+  const hasValidAqi = typeof station.aqi === 'number' && Number.isFinite(station.aqi);
+  const aqiEl = doc.createElement('span');
+  aqiEl.style.color = color;
+  aqiEl.style.fontWeight = '700';
+  aqiEl.style.fontFamily = 'monospace';
+  aqiEl.textContent = hasValidAqi ? `AQI ${station.aqi}` : 'AQI N/A';
+
+  const kindEl = doc.createElement('span');
+  kindEl.style.fontSize = '9px';
+  kindEl.style.color = 'var(--text-secondary, #687771)';
+  kindEl.textContent = 'Ground Station';
+
+  headerEl.appendChild(aqiEl);
+  headerEl.appendChild(kindEl);
+
+  const nameEl = doc.createElement('div');
+  nameEl.style.fontWeight = '600';
+  nameEl.style.color = 'var(--text-primary, #172522)';
+  nameEl.style.lineHeight = '1.3';
+  nameEl.textContent = station.name;
+
+  const providerEl = doc.createElement('div');
+  providerEl.style.fontSize = '9.5px';
+  providerEl.style.color = 'var(--text-secondary, #687771)';
+  providerEl.style.marginTop = '4px';
+  providerEl.textContent = `Provider: ${station.provider || 'Regional Agency'}`;
+
+  container.appendChild(headerEl);
+  container.appendChild(nameEl);
+  container.appendChild(providerEl);
+  return container;
+}
 
 export const GlobalPollutionMap: React.FC = () => {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
-  const { activeCity, setActiveCity, airQuality } = useAQI();
-  const { theme, resolvedTheme } = useTheme();
+  const { activeCity, airQuality } = useAQI();
+  const { resolvedTheme } = useTheme();
 
   // Control panel states
   const [selectedStation, setSelectedStation] = useState<MonitoringStation | null>(null);
   const [nearbyStations, setNearbyStations] = useState<MonitoringStation[]>([]);
   const [loadingStations, setLoadingStations] = useState<boolean>(false);
-  const [selectedVariable, setSelectedVariable] = useState<PollutantVariable>('pm25');
-  const [activeDataset, setActiveDataset] = useState<'ground' | 'cams_model' | 'forecast'>('ground');
   const [aqiTierFilter, setAqiTierFilter] = useState<AqiTier>('all');
   const [bottomWorkspaceOpen, setBottomWorkspaceOpen] = useState<boolean>(true);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [timelineIndex, setTimelineIndex] = useState<number>(0);
   const [temporalStep, setTemporalStep] = useState<TemporalStep>('hourly');
-  const [chartMode, setChartMode] = useState<'standardized' | 'absolute'>('standardized');
 
   // Map tile URLs based on current theme
   const getMapStyle = (currentTheme: 'light' | 'dark'): maplibregl.StyleSpecification => {
@@ -126,6 +444,13 @@ export const GlobalPollutionMap: React.FC = () => {
     map.current.setStyle(getMapStyle(resolvedTheme));
   }, [resolvedTheme]);
 
+  // Forecast points for bottom timeline scrubber
+  const { points: timelinePoints, label: timelineWindowLabel } = selectTemporalTimelinePoints(
+    airQuality?.forecast,
+    temporalStep
+  );
+  const telemetrySummary = buildMapTelemetrySummary(airQuality);
+
   // Pan to active city when changed & fetch stations
   useEffect(() => {
     if (!map.current) return;
@@ -136,49 +461,48 @@ export const GlobalPollutionMap: React.FC = () => {
       duration: 1200,
     });
 
+    let active = true;
     setLoadingStations(true);
+    setSelectedStation(null);
+    setNearbyStations([]);
     api.getNearbyStations(activeCity.latitude, activeCity.longitude)
       .then((stations) => {
-        setNearbyStations(stations);
+        if (active) setNearbyStations(stations);
       })
-      .catch(console.error)
-      .finally(() => setLoadingStations(false));
+      .catch((err) => {
+        console.error(err);
+        if (active) setNearbyStations([]);
+      })
+      .finally(() => {
+        if (active) setLoadingStations(false);
+      });
+
+    return () => {
+      active = false;
+    };
   }, [activeCity]);
+
+  // Reset timeline index when temporal step or city changes
+  useEffect(() => {
+    setTimelineIndex(0);
+    setIsPlaying(false);
+  }, [temporalStep, activeCity]);
 
   // Time scrubber autoplay
   useEffect(() => {
     let interval: ReturnType<typeof setInterval> | null = null;
-    if (isPlaying) {
+    if (isPlaying && timelinePoints.length > 0) {
       interval = setInterval(() => {
-        setTimelineIndex((prev) => (prev + 1) % 24);
+        setTimelineIndex((prev) => (prev + 1) % timelinePoints.length);
       }, 1000);
     }
     return () => {
       if (interval) clearInterval(interval);
     };
-  }, [isPlaying]);
+  }, [isPlaying, timelinePoints.length]);
 
-  // Color helper for station pins based on CliMA Scope scientific scale
-  const getAQIColor = (aqi?: number | null) => {
-    if (aqi === undefined || aqi === null) return '#159DB0';
-    if (aqi <= 50) return '#23966B';   // Good (Teal Green)
-    if (aqi <= 100) return '#D5A33A';  // Moderate (Amber Gold)
-    if (aqi <= 150) return '#E27C42';  // Poor (Warm Orange)
-    if (aqi <= 200) return '#C94E55';  // Severe (Deep Coral Red)
-    if (aqi <= 300) return '#8E44AD';  // Very Severe (Purple)
-    return '#5B2C6F';                  // Hazardous (Deep Maroon)
-  };
-
-  // Filter stations based on selection
-  const filteredStations = nearbyStations.filter((st) => {
-    if (aqiTierFilter === 'all') return true;
-    const val = st.aqi ?? 50;
-    if (aqiTierFilter === 'good') return val <= 50;
-    if (aqiTierFilter === 'moderate') return val > 50 && val <= 100;
-    if (aqiTierFilter === 'poor') return val > 100 && val <= 150;
-    if (aqiTierFilter === 'severe') return val > 150;
-    return true;
-  });
+  // Filter stations based on AQI severity selection without coercing null to 50
+  const filteredStations = filterStationsByAqiTier(nearbyStations, aqiTierFilter);
 
   // Render station pins and target city marker
   useEffect(() => {
@@ -211,15 +535,9 @@ export const GlobalPollutionMap: React.FC = () => {
     const cityMarker = new maplibregl.Marker(cityEl)
       .setLngLat([activeCity.longitude, activeCity.latitude])
       .setPopup(
-        new maplibregl.Popup({ offset: 12 }).setHTML(`
-          <div style="font-size: 11px;">
-            <div style="color: #087F72; font-weight: 700;">${activeCity.name}</div>
-            <div style="color: #647570; font-size: 10px;">Geographical Focus Location</div>
-            <div style="color: #172B28; font-family: monospace; font-size: 10px; margin-top: 3px;">
-              ${activeCity.latitude.toFixed(4)}°N, ${activeCity.longitude.toFixed(4)}°E
-            </div>
-          </div>
-        `)
+        new maplibregl.Popup({ offset: 12 }).setDOMContent(
+          buildCityPopupElement(activeCity.name, activeCity.latitude, activeCity.longitude)
+        )
       )
       .addTo(map.current!);
 
@@ -227,9 +545,16 @@ export const GlobalPollutionMap: React.FC = () => {
 
     // 2. Physical Monitoring Station Pins
     filteredStations.forEach((st) => {
-      if (!st.latitude || !st.longitude) return;
+      if (
+        typeof st.latitude !== 'number' ||
+        !Number.isFinite(st.latitude) ||
+        typeof st.longitude !== 'number' ||
+        !Number.isFinite(st.longitude)
+      ) {
+        return;
+      }
 
-      const color = getAQIColor(st.aqi);
+      const color = getAqiScaleColor(st.aqi, '#159DB0');
       const stEl = document.createElement('button');
       stEl.type = 'button';
       stEl.className = 'scientific-station-pin';
@@ -244,7 +569,8 @@ export const GlobalPollutionMap: React.FC = () => {
       stEl.style.fontWeight = '700';
       stEl.style.cursor = 'pointer';
       stEl.style.boxShadow = '0 2px 6px rgba(0,0,0,0.12)';
-      stEl.innerText = st.aqi !== undefined && st.aqi !== null ? String(st.aqi) : '●';
+      const hasPinAqi = typeof st.aqi === 'number' && Number.isFinite(st.aqi);
+      stEl.innerText = hasPinAqi ? String(st.aqi) : '●';
 
       stEl.addEventListener('click', () => {
         setSelectedStation(st);
@@ -253,16 +579,9 @@ export const GlobalPollutionMap: React.FC = () => {
       const stMarker = new maplibregl.Marker(stEl)
         .setLngLat([st.longitude, st.latitude])
         .setPopup(
-          new maplibregl.Popup({ offset: 14 }).setHTML(`
-            <div style="font-size: 11px; max-width: 200px;">
-              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                <span style="color: ${color}; font-weight: 700; font-family: monospace;">AQI ${st.aqi ?? 'N/A'}</span>
-                <span style="font-size: 9px; color: #647570;">Ground Station</span>
-              </div>
-              <div style="font-weight: 600; color: #172B28; line-height: 1.3;">${st.name}</div>
-              <div style="font-size: 9.5px; color: #647570; margin-top: 4px;">Provider: ${st.provider || 'Regional Agency'}</div>
-            </div>
-          `)
+          new maplibregl.Popup({ offset: 14 }).setDOMContent(
+            buildStationPopupElement(st, color)
+          )
         )
         .addTo(map.current!);
 
@@ -299,9 +618,9 @@ export const GlobalPollutionMap: React.FC = () => {
     }
   };
 
-  // Forecast points for bottom timeline scrubber
-  const timelinePoints = (airQuality?.forecast || []).slice(0, 24);
-  const activePoint = timelinePoints[timelineIndex] || null;
+  const safeIndex = Math.min(timelineIndex, Math.max(0, timelinePoints.length - 1));
+  const activePoint = timelinePoints[safeIndex] || null;
+  const activePointAqi = activePoint ? resolveForecastAqi(activePoint) : null;
 
   return (
     <div className="relative w-full h-[calc(100vh-3.5rem)] bg-clima-bg dark:bg-darkClima-bg overflow-hidden select-none">
@@ -309,80 +628,26 @@ export const GlobalPollutionMap: React.FC = () => {
       <div ref={mapContainer} className="w-full h-full" />
 
       {/* =========================================================================
-          1. FLOATING TOP CONTROLS (Inspired by CliMA Scope Top Bar)
-         ========================================================================= */}
-      <div className="absolute top-3 left-1/2 -translate-x-1/2 z-20 hidden md:flex items-center space-x-3 bg-clima-surface/95 dark:bg-darkClima-surface/95 backdrop-blur-md px-3 py-1.5 rounded-lg border border-clima-border dark:border-darkClima-border shadow-floating dark:shadow-floating-dark text-xs">
-        <div className="flex items-center space-x-1.5 text-clima-muted dark:text-darkClima-muted font-sans text-[11px]">
-          <span>View Mode:</span>
-          <button
-            onClick={() => setActiveDataset('ground')}
-            className={`px-2 py-0.5 rounded font-medium transition-colors ${
-              activeDataset === 'ground'
-                ? 'bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg shadow-sm'
-                : 'text-clima-text dark:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle'
-            }`}
-          >
-            Physical Stations
-          </button>
-          <button
-            onClick={() => setActiveDataset('cams_model')}
-            className={`px-2 py-0.5 rounded font-medium transition-colors ${
-              activeDataset === 'cams_model'
-                ? 'bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg shadow-sm'
-                : 'text-clima-text dark:text-darkClima-text hover:bg-clima-subtle dark:hover:bg-darkClima-subtle'
-            }`}
-          >
-            CAMS Model Grid
-          </button>
-        </div>
-
-        <span className="h-3 w-px bg-clima-border dark:bg-darkClima-border" />
-
-        <div className="flex items-center space-x-1 text-clima-muted dark:text-darkClima-muted font-sans text-[11px]">
-          <span>Scale:</span>
-          <button
-            onClick={() => setChartMode('standardized')}
-            className={`px-1.5 py-0.5 rounded font-medium ${
-              chartMode === 'standardized'
-                ? 'text-clima-accent dark:text-darkClima-accent font-semibold'
-                : 'hover:text-clima-text'
-            }`}
-          >
-            Relative
-          </button>
-          <span>/</span>
-          <button
-            onClick={() => setChartMode('absolute')}
-            className={`px-1.5 py-0.5 rounded font-medium ${
-              chartMode === 'absolute'
-                ? 'text-clima-accent dark:text-darkClima-accent font-semibold'
-                : 'hover:text-clima-text'
-            }`}
-          >
-            Concentration
-          </button>
-        </div>
-      </div>
-
-      {/* =========================================================================
-          2. FLOATING LEFT CONTROL DOCK (CliMA Scope Datasets & Variables)
+          1. FLOATING LEFT CONTROL DOCK (Monitoring Array & Severity Filters)
          ========================================================================= */}
       <div className="absolute top-3 left-3 z-20 w-72 max-w-[calc(100vw-1.5rem)] space-y-2 font-sans">
-        {/* Datasets Accordion Card */}
+        {/* Datasets Summary Card */}
         <div className="bg-clima-surface/95 dark:bg-darkClima-surface/95 backdrop-blur-md rounded-lg border border-clima-border dark:border-darkClima-border shadow-floating dark:shadow-floating-dark p-3 space-y-2">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-semibold uppercase tracking-wider text-clima-muted dark:text-darkClima-muted">
-              Datasets
+              Sensor Network
             </span>
             <span className="text-[10px] font-mono text-clima-accent dark:text-darkClima-accent font-medium">
-              v1.4.0
+              {filteredStations.length} shown
             </span>
           </div>
 
           <div className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 rounded-md p-2 flex items-center justify-between text-xs">
             <div className="flex items-center space-x-2">
               <Radio className="w-3.5 h-3.5 text-clima-accent dark:text-darkClima-accent animate-pulse" />
-              <span className="font-medium text-clima-text dark:text-darkClima-text">WAQI Sensor Array</span>
+              <span className="font-medium text-clima-text dark:text-darkClima-text">
+                {nearbyStations[0]?.provider?.includes('OpenAQ') ? 'OpenAQ Sensor Array' : 'Ground Sensor Array'}
+              </span>
             </div>
             <span className="text-[10px] font-mono bg-clima-surface dark:bg-darkClima-surface px-1.5 py-0.5 rounded border border-clima-border dark:border-darkClima-border text-clima-muted dark:text-darkClima-muted">
               {loadingStations ? 'Syncing...' : `${nearbyStations.length} live`}
@@ -390,84 +655,42 @@ export const GlobalPollutionMap: React.FC = () => {
           </div>
         </div>
 
-        {/* Variables Selection Card */}
-        <div className="bg-clima-surface/95 dark:bg-darkClima-surface/95 backdrop-blur-md rounded-lg border border-clima-border dark:border-darkClima-border shadow-floating dark:shadow-floating-dark p-3 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-wider text-clima-muted dark:text-darkClima-muted">
-              Variables
-            </span>
-            <span className="text-[10px] text-clima-muted dark:text-darkClima-muted">
-              Surface Layer
-            </span>
-          </div>
-
-          {/* Variable Selector Badges */}
-          <div className="grid grid-cols-3 gap-1.5 text-xs font-mono">
+        {/* Severity Classification Filter Tiers */}
+        <div className="bg-clima-surface/95 dark:bg-darkClima-surface/95 backdrop-blur-md rounded-lg border border-clima-border dark:border-darkClima-border shadow-floating dark:shadow-floating-dark p-3 space-y-1.5">
+          <span className="text-[10px] font-medium text-clima-muted dark:text-darkClima-muted block">
+            Filter Stations by AQI Severity:
+          </span>
+          <div className="grid grid-cols-5 gap-1 text-[9.5px] font-mono text-center">
             {[
-              { id: 'pm25', label: 'PM2.5', desc: 'Fine' },
-              { id: 'pm10', label: 'PM10', desc: 'Coarse' },
-              { id: 'no2', label: 'NO₂', desc: 'Nitrogen' },
-              { id: 'so2', label: 'SO₂', desc: 'Sulphur' },
-              { id: 'co', label: 'CO', desc: 'Carbon' },
-              { id: 'o3', label: 'O₃', desc: 'Ozone' },
-            ].map((v) => {
-              const isSelected = selectedVariable === v.id;
+              { id: 'all', label: 'All' },
+              { id: 'good', label: 'Good' },
+              { id: 'moderate', label: 'Mod' },
+              { id: 'poor', label: 'Poor' },
+              { id: 'severe', label: 'Sev' },
+            ].map((t) => {
+              const isActive = aqiTierFilter === t.id;
               return (
                 <button
-                  key={v.id}
-                  onClick={() => setSelectedVariable(v.id as PollutantVariable)}
-                  className={`py-1.5 px-2 rounded-md border text-left transition-all ${
-                    isSelected
-                      ? 'bg-clima-accent dark:bg-darkClima-accent text-white dark:text-darkClima-bg border-clima-accent dark:border-darkClima-accent font-bold shadow-sm'
-                      : 'bg-clima-subtle/60 dark:bg-darkClima-subtle/60 text-clima-text dark:text-darkClima-text border-clima-border dark:border-darkClima-border hover:border-clima-muted'
+                  key={t.id}
+                  onClick={() => setAqiTierFilter(t.id as AqiTier)}
+                  className={`py-1 rounded border transition-colors ${
+                    isActive
+                      ? 'bg-clima-text dark:bg-darkClima-text text-clima-surface dark:text-darkClima-surface border-clima-text dark:border-darkClima-text font-bold'
+                      : 'bg-clima-subtle/40 dark:bg-darkClima-subtle/40 text-clima-muted dark:text-darkClima-muted border-clima-border dark:border-darkClima-border hover:text-clima-text'
                   }`}
                 >
-                  <div className="text-[11px] leading-tight">{v.label}</div>
-                  <div className={`text-[8.5px] truncate ${isSelected ? 'text-white font-medium' : 'text-clima-muted dark:text-darkClima-muted'}`}>
-                    {v.desc}
-                  </div>
+                  {t.label}
                 </button>
               );
             })}
           </div>
-
-          {/* Severity Classification Filter Tiers */}
-          <div className="pt-2 border-t border-clima-border dark:border-darkClima-border space-y-1.5">
-            <span className="text-[10px] font-medium text-clima-muted dark:text-darkClima-muted block">
-              Filter by Severity Threshold:
-            </span>
-            <div className="grid grid-cols-5 gap-1 text-[9.5px] font-mono text-center">
-              {[
-                { id: 'all', label: 'All' },
-                { id: 'good', label: 'Good' },
-                { id: 'moderate', label: 'Mod' },
-                { id: 'poor', label: 'Poor' },
-                { id: 'severe', label: 'Sev' },
-              ].map((t) => {
-                const isActive = aqiTierFilter === t.id;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => setAqiTierFilter(t.id as AqiTier)}
-                    className={`py-1 rounded border transition-colors ${
-                      isActive
-                        ? 'bg-clima-text dark:bg-darkClima-text text-clima-surface dark:text-darkClima-surface border-clima-text dark:border-darkClima-text font-bold'
-                        : 'bg-clima-subtle/40 dark:bg-darkClima-subtle/40 text-clima-muted dark:text-darkClima-muted border-clima-border dark:border-darkClima-border hover:text-clima-text'
-                    }`}
-                  >
-                    {t.label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
         </div>
 
-        {/* CliMA Scope Bivariate / Visual Scale Legend */}
+        {/* AQI Numerical Visual Scale Legend */}
         <div className="bg-clima-surface/95 dark:bg-darkClima-surface/95 backdrop-blur-md rounded-lg border border-clima-border dark:border-darkClima-border shadow-floating dark:shadow-floating-dark p-3 space-y-2">
           <div className="flex items-center justify-between text-[10px] font-semibold uppercase text-clima-muted dark:text-darkClima-muted">
-            <span>AQI Numerical Distribution</span>
-            <span className="font-mono">{selectedVariable.toUpperCase()}</span>
+            <span>Station AQI Distribution</span>
+            <span className="font-mono">US EPA</span>
           </div>
 
           {/* Continuous Scientific Color Ramp */}
@@ -562,14 +785,26 @@ export const GlobalPollutionMap: React.FC = () => {
               <span className="text-[9.5px] text-clima-muted dark:text-darkClima-muted block uppercase">Reported AQI</span>
               <span
                 className="text-xl font-bold font-mono"
-                style={{ color: getAQIColor(selectedStation.aqi) }}
+                style={{ color: getAqiScaleColor(selectedStation.aqi, '#159DB0') }}
               >
-                {selectedStation.aqi ?? '—'}
+                {typeof selectedStation.aqi === 'number' && Number.isFinite(selectedStation.aqi)
+                  ? selectedStation.aqi
+                  : '—'}
               </span>
             </div>
             <div>
               <span className="text-[9.5px] text-clima-muted dark:text-darkClima-muted block uppercase">Telemetry Status</span>
-              <span className="text-xs text-[#23966B] font-semibold font-mono">LIVE / OK</span>
+              <span
+                className={`text-xs font-semibold font-mono ${
+                  typeof selectedStation.aqi === 'number' && Number.isFinite(selectedStation.aqi)
+                    ? 'text-[#23966B]'
+                    : 'text-clima-muted dark:text-darkClima-muted'
+                }`}
+              >
+                {typeof selectedStation.aqi === 'number' && Number.isFinite(selectedStation.aqi)
+                  ? 'LIVE / OK'
+                  : 'ACTIVE (AQI N/A)'}
+              </span>
             </div>
           </div>
 
@@ -634,30 +869,40 @@ export const GlobalPollutionMap: React.FC = () => {
           {/* Expanded Analytical Content */}
           {bottomWorkspaceOpen && (
             <div className="p-4 grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
-              {/* Left Column: Mini Polar / Statistical Correlation Summary */}
+              {/* Left Column: Verified Telemetry Status Summary */}
               <div className="md:col-span-3 border-r border-clima-border dark:border-darkClima-border pr-4 hidden md:block">
                 <div className="text-[10px] font-semibold uppercase text-clima-muted dark:text-darkClima-muted mb-1.5">
-                  Multi-Seasonal Air Profile
+                  Station Atmospheric Summary
                 </div>
                 <div className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 rounded-lg p-2.5 space-y-1.5 text-[11px]">
                   <div className="flex justify-between">
                     <span className="text-clima-muted dark:text-darkClima-muted font-sans">Dominant Parameter:</span>
                     <span className="font-mono font-semibold text-clima-text dark:text-darkClima-text">
-                      {airQuality?.dominant_pollutant || 'PM2.5'}
+                      {telemetrySummary.dominantPollutant}
                     </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-clima-muted dark:text-darkClima-muted font-sans">Dispersion Index:</span>
-                    <span className="font-mono font-semibold text-[#23966B]">Normal (3.2 m/s)</span>
+                    <span className="text-clima-muted dark:text-darkClima-muted font-sans">Source Mode:</span>
+                    <span className="font-mono font-semibold text-clima-text dark:text-darkClima-text">
+                      {telemetrySummary.observationMode}
+                    </span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="text-clima-muted dark:text-darkClima-muted font-sans">Model Reliability:</span>
-                    <span className="font-mono font-semibold text-clima-accent dark:text-darkClima-accent">High (CAMS)</span>
+                    <span className="text-clima-muted dark:text-darkClima-muted font-sans">Forecast Stream:</span>
+                    <span
+                      className={`font-mono font-semibold ${
+                        telemetrySummary.forecastStatus === 'Active'
+                          ? 'text-clima-accent dark:text-darkClima-accent'
+                          : 'text-clima-muted dark:text-darkClima-muted'
+                      }`}
+                    >
+                      {telemetrySummary.forecastStatus}
+                    </span>
                   </div>
                 </div>
               </div>
 
-              {/* Right Column: 24h Time Scrubber Slider and Wave Ribbon */}
+              {/* Right Column: Time Scrubber Slider and Wave Ribbon */}
               <div className="md:col-span-9 space-y-2">
                 <div className="flex items-center justify-between text-xs font-mono">
                   <div className="flex items-center space-x-2">
@@ -665,36 +910,47 @@ export const GlobalPollutionMap: React.FC = () => {
                       Scrubber Step:
                     </span>
                     <span className="font-bold text-clima-accent dark:text-darkClima-accent">
-                      {activePoint ? new Date(activePoint.time).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Now'}
+                      {activePoint
+                        ? (() => {
+                            const d = new Date(activePoint.time);
+                            return Number.isNaN(d.getTime())
+                              ? activePoint.time
+                              : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                          })()
+                        : 'Now'}
                     </span>
                     {activePoint && (
                       <span className="text-clima-muted dark:text-darkClima-muted text-[11px]">
-                        (AQI ~ {activePoint.us_aqi || Math.round((activePoint.pm25 || 10) * 2.2)})
+                        {activePointAqi !== null ? `(AQI ~ ${activePointAqi})` : '(AQI N/A)'}
                       </span>
                     )}
                   </div>
                   <span className="text-[10px] text-clima-muted dark:text-darkClima-muted">
-                    24h Contiguous Forecast
+                    {timelineWindowLabel}
                   </span>
                 </div>
 
                 {/* Scrubber Range Slider */}
                 <input
                   type="range"
-                  aria-label="24-hour forecast timeline scrubber"
+                  aria-label="Forecast timeline scrubber"
                   min="0"
                   max={Math.max(0, timelinePoints.length - 1)}
-                  value={timelineIndex}
+                  value={safeIndex}
                   onChange={(e) => setTimelineIndex(Number(e.target.value))}
                   className="w-full h-1.5 bg-clima-subtle dark:bg-darkClima-subtle rounded-lg appearance-none cursor-pointer accent-[#087F72]"
                 />
 
-                {/* 24-point Mini Wave Timeline Bar */}
-                <div className="grid grid-cols-12 sm:grid-cols-24 gap-1 pt-1">
+                {/* Mini Wave Timeline Bar */}
+                <div
+                  className={`grid gap-1 pt-1 ${
+                    temporalStep === 'daily' ? 'grid-cols-3' : 'grid-cols-12 sm:grid-cols-24'
+                  }`}
+                >
                   {timelinePoints.map((pt, idx) => {
-                    const isCurrent = idx === timelineIndex;
-                    const aqi = pt.us_aqi || Math.round((pt.pm25 || 10) * 2.2);
-                    const color = getAQIColor(aqi);
+                    const isCurrent = idx === safeIndex;
+                    const aqi = resolveForecastAqi(pt);
+                    const color = getAqiScaleColor(aqi, '#159DB0');
 
                     return (
                       <div
@@ -706,12 +962,12 @@ export const GlobalPollutionMap: React.FC = () => {
                             : 'opacity-70 hover:opacity-100'
                         }`}
                         style={{ backgroundColor: `${color}25` }}
-                        title={`${new Date(pt.time).toLocaleTimeString([], { hour: 'numeric' })}: AQI ${aqi}`}
+                        title={`${new Date(pt.time).toLocaleTimeString([], { hour: 'numeric' })}: AQI ${aqi !== null ? aqi : 'N/A'}`}
                       >
                         <div
                           className="w-full rounded-sm"
                           style={{
-                            height: `${Math.min(100, Math.max(20, (aqi / 200) * 100))}%`,
+                            height: `${aqi !== null ? Math.min(100, Math.max(20, (aqi / 200) * 100)) : 0}%`,
                             backgroundColor: color,
                           }}
                         />

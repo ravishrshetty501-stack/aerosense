@@ -1,6 +1,8 @@
 import pytest
 import uuid
+from datetime import datetime, timezone
 from app.services.alert_service import AlertService, alert_service
+from app.services.providers.base import NormalizedMeasurement
 from app.core.database import engine, Base, AsyncSessionLocal
 from app.models.user import User
 from app.models.alert import AlertRule, AlertEvent
@@ -70,6 +72,66 @@ def test_detect_spike_conditions():
     assert no2_spike is not None
     assert no2_spike["pollutant"] == "NO2"
     assert no2_spike["current_val"] == 75.0
+
+    # Exact threshold boundary: ratio == 1.6 and delta == 15.0 (25 -> 40)
+    exact_history = [{"pm25": 25.0} for _ in range(6)]
+    exact_spike = AlertService.detect_spike(exact_history, 40.0, "pm25")
+    assert exact_spike is not None
+    assert exact_spike["spike_ratio"] == 1.6
+
+    # Just below ratio threshold (ratio 1.59, delta 59.0 >= 15.0)
+    high_base_history = [{"pm25": 100.0} for _ in range(6)]
+    assert AlertService.detect_spike(high_base_history, 159.0, "pm25") is None
+
+    # Just below minimum delta threshold (ratio 2.0 >= 1.6, delta 14.0 < 15.0)
+    low_delta_history = [{"pm25": 14.0} for _ in range(6)]
+    assert AlertService.detect_spike(low_delta_history, 28.0, "pm25") is None
+
+    # Missing current value (None)
+    assert AlertService.detect_spike(exact_history, None, "pm25") is None
+
+    # Zero baseline must not divide by zero or trigger spike
+    zero_base_history = [{"pm25": 0.0} for _ in range(6)]
+    assert AlertService.detect_spike(zero_base_history, 25.0, "pm25") is None
+
+    # Genuine zero current value must not trigger spike
+    assert AlertService.detect_spike(exact_history, 0.0, "pm25") is None
+
+    # Six trailing missing readings after older valid history -> None
+    trailing_missing = [{"pm25": 25.0} for _ in range(6)] + [{"pm25": None} for _ in range(6)]
+    assert AlertService.detect_spike(trailing_missing, 60.0, "pm25") is None
+
+    # Non-finite current readings rejected cleanly
+    assert AlertService.detect_spike(exact_history, float("nan"), "pm25") is None
+    assert AlertService.detect_spike(exact_history, float("inf"), "pm25") is None
+    assert AlertService.detect_spike(exact_history, float("-inf"), "pm25") is None
+    assert AlertService.detect_spike(exact_history, 10**400, "pm25") is None
+    assert AlertService.detect_spike(exact_history, -10**400, "pm25") is None
+    assert AlertService.detect_spike([{"pm25": 10**400} for _ in range(6)], 60.0, "pm25") is None
+
+    # Non-finite historical records excluded without poisoning average
+    all_nonfinite_history = [
+        {"pm25": float("nan")},
+        {"pm25": float("inf")},
+        {"pm25": float("-inf")},
+        {"pm25": float("nan")},
+        {"pm25": float("inf")},
+        {"pm25": float("-inf")},
+    ]
+    assert AlertService.detect_spike(all_nonfinite_history, 60.0, "pm25") is None
+
+    mixed_nonfinite_history = [
+        {"pm25": 25.0},
+        {"pm25": float("nan")},
+        {"pm25": float("inf")},
+        {"pm25": 25.0},
+        {"pm25": float("-inf")},
+        {"pm25": 25.0},
+    ]
+    mixed_spike = AlertService.detect_spike(mixed_nonfinite_history, 40.0, "pm25")
+    assert mixed_spike is not None
+    assert mixed_spike["recent_average"] == 25.0
+    assert mixed_spike["spike_ratio"] == 1.6
 
 @pytest.mark.asyncio
 async def test_evaluate_rules_for_location():
@@ -156,3 +218,152 @@ async def test_evaluate_rules_for_location():
             user_id=test_uid
         )
         assert len(sub_triggered) == 0
+
+
+@pytest.mark.asyncio
+async def test_evaluate_rules_pollutant_specific_representations_and_edge_cases():
+    """Verifies pollutant-specific rule evaluation across dict, NormalizedMeasurement, missing, and non-finite inputs."""
+    test_uid = f"user_{uuid.uuid4().hex[:8]}"
+    now = datetime.now(timezone.utc)
+
+    async with AsyncSessionLocal() as session:
+        user = User(
+            id=test_uid,
+            email=f"{test_uid}@test.ai",
+            hashed_password="fakehashedpassword",
+            full_name="Pollutant Rule Tester"
+        )
+        session.add(user)
+
+        rule_pm25 = AlertRule(
+            id=f"rule_pm25_{uuid.uuid4().hex[:8]}",
+            user_id=test_uid,
+            location_name="Paris",
+            latitude=48.85,
+            longitude=2.35,
+            threshold_aqi=50.0,
+            pollutant="pm25",
+            severity="warning",
+            is_active=True
+        )
+        rule_aqi = AlertRule(
+            id=f"rule_aqi_{uuid.uuid4().hex[:8]}",
+            user_id=test_uid,
+            location_name="Paris",
+            latitude=48.85,
+            longitude=2.35,
+            threshold_aqi=100.0,
+            pollutant="aqi",
+            severity="warning",
+            is_active=True
+        )
+        session.add_all([rule_pm25, rule_aqi])
+        await session.commit()
+
+        # 1. Missing pollutant & None current_aqi must NOT crash or accidentally trigger via current_aqi
+        res_missing = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=None,
+            measurements={},
+            user_id=test_uid
+        )
+        assert res_missing == []
+
+        # Missing pm25 must NOT fall back to high current_aqi (200) to trigger pm25 rule; only aqi rule triggers
+        res_fallback_guard = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=200.0,
+            measurements={"no2": {"value": 10.0}},
+            user_id=test_uid
+        )
+        assert len(res_fallback_guard) == 1
+        assert res_fallback_guard[0]["rule_id"] == rule_aqi.id
+
+        # 2. Dict measurement with value=None must not crash or trigger
+        res_dict_none = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=None,
+            measurements={"pm25": {"value": None}},
+            user_id=test_uid
+        )
+        assert res_dict_none == []
+
+        # 3. Non-finite, overflow, and boolean pollutant/AQI inputs must be safely rejected
+        for invalid_val in (float("nan"), float("inf"), float("-inf"), 10**400, -10**400, True, False):
+            res_invalid = await alert_service.evaluate_rules_for_location(
+                db=session,
+                location_name="Paris",
+                current_aqi=invalid_val,
+                measurements={"pm25": {"value": invalid_val}},
+                user_id=test_uid
+            )
+            assert res_invalid == []
+
+        # 4. Valid measurement below threshold (including genuine 0.0) must not trigger
+        for low_val in (0.0, 49.9):
+            res_below = await alert_service.evaluate_rules_for_location(
+                db=session,
+                location_name="Paris",
+                current_aqi=None,
+                measurements={"pm25": {"value": low_val}},
+                user_id=test_uid
+            )
+            assert res_below == []
+
+        # 5. Valid dictionary measurement crossing threshold triggers pm25 rule
+        res_dict_trigger = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=None,
+            measurements={"pm25": {"value": 65.0}},
+            user_id=test_uid
+        )
+        assert len(res_dict_trigger) == 1
+        assert res_dict_trigger[0]["rule_id"] == rule_pm25.id
+        assert res_dict_trigger[0]["trigger_value"] == 65.0
+
+        # 6. Valid NormalizedMeasurement object crossing threshold triggers pm25 rule cleanly
+        norm_meas = NormalizedMeasurement(
+            pollutant="pm25",
+            value=80.0,
+            unit="ug/m3",
+            measurement_type="ground_observation",
+            source="WAQI Paris",
+            data_quality="verified",
+            observation_timestamp=now,
+            retrieval_timestamp=now,
+        )
+        res_norm_trigger = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=None,
+            measurements={"pm25": norm_meas},
+            user_id=test_uid,
+            cooldown_minutes=0,
+        )
+        assert len(res_norm_trigger) == 1
+        assert res_norm_trigger[0]["rule_id"] == rule_pm25.id
+        assert res_norm_trigger[0]["trigger_value"] == 80.0
+
+        # 7. Default cooldown deduplication suppresses immediate duplicate triggers while escaping wildcard chars
+        res_deduped = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="Paris",
+            current_aqi=None,
+            measurements={"pm25": norm_meas},
+            user_id=test_uid,
+        )
+        assert res_deduped == []
+
+        res_wildcard_safe = await alert_service.evaluate_rules_for_location(
+            db=session,
+            location_name="%",
+            current_aqi=200.0,
+            measurements={"pm25": {"value": 90.0}},
+            user_id=test_uid,
+            cooldown_minutes=0,
+        )
+        assert res_wildcard_safe == []

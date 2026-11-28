@@ -1,27 +1,169 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
-import { ReportDataResponse, ReportMeasurementItem } from '../../types/airQuality';
-import { FileText, Download, RefreshCw, CheckCircle2, ShieldCheck, Layers } from 'lucide-react';
+import { AQIStandard, ReportDataResponse, ReportMeasurementItem } from '../../types/airQuality';
+import { getStandardAqiScaleColor } from '../../utils/airQualityHelpers';
+import { FileText, Download, RefreshCw, AlertTriangle } from 'lucide-react';
+
+function isFiniteNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
+
+function normalizeFiniteNumber(val: number): number {
+  return Object.is(val, -0) ? 0 : val;
+}
+
+export function formatReportConcentration(val: unknown): string {
+  if (!isFiniteNumber(val)) return 'Unavailable';
+  return String(normalizeFiniteNumber(val));
+}
+
+export interface ResolvedReportDisplay {
+  hasFiniteAqi: boolean;
+  aqiDisplay: number | string;
+  aqiColor: string;
+  aqiCategory: string;
+  dominantPollutant: string;
+  primarySource: string;
+  ingestionMode: string;
+  validationStatus: string;
+  healthAdvisory: string;
+  measurementEntries: Array<[string, ReportMeasurementItem]>;
+}
+
+/**
+ * Resolves report metrics, category styling, and telemetry attribution without fabricating
+ * pollutants, AQI values, or ingestion claims when data is missing or non-finite.
+ */
+export function resolveReportDisplay(reportData: ReportDataResponse): ResolvedReportDisplay {
+  const hasFiniteAqi = isFiniteNumber(reportData.aqi_value);
+  const aqiDisplay = hasFiniteAqi ? normalizeFiniteNumber(reportData.aqi_value as number) : '—';
+  const aqiColor = hasFiniteAqi
+    ? getStandardAqiScaleColor(reportData.aqi_value, reportData.aqi_standard)
+    : '#647570';
+  const aqiCategory = reportData.aqi_category?.trim() ? reportData.aqi_category : 'Unavailable';
+  const dominantPollutant = reportData.dominant_pollutant?.trim()
+    ? reportData.dominant_pollutant
+    : 'Unavailable';
+  const primarySource = reportData.primary_source?.trim() ? reportData.primary_source : 'Unavailable';
+
+  const measurementEntries = Object.entries(reportData.measurements || {}) as Array<
+    [string, ReportMeasurementItem]
+  >;
+  const validMeasurements = measurementEntries.filter(([, item]) => isFiniteNumber(item?.value));
+  const hasValidTelemetry = validMeasurements.length > 0 || hasFiniteAqi;
+  const hasGroundMeasurement = validMeasurements.some(
+    ([, item]) => item?.type === 'ground_observation'
+  );
+
+  let ingestionMode = 'Unavailable';
+  if (hasValidTelemetry) {
+    ingestionMode =
+      hasGroundMeasurement || (validMeasurements.length > 0 && reportData.is_ground_observation)
+        ? 'Ground Telemetry'
+        : reportData.is_ground_observation
+        ? 'Ground Telemetry'
+        : 'Model Estimate';
+  }
+
+  return {
+    hasFiniteAqi,
+    aqiDisplay,
+    aqiColor,
+    aqiCategory,
+    dominantPollutant,
+    primarySource,
+    ingestionMode,
+    validationStatus: hasValidTelemetry ? 'Quality Checked' : 'Data Unavailable',
+    healthAdvisory: reportData.health_advisory?.trim()
+      ? reportData.health_advisory
+      : 'No public health advisory available for this reporting period.',
+    measurementEntries,
+  };
+}
+
+/**
+ * Fetches briefing data and returns a normalized outcome with explicit error state on failure.
+ */
+export async function loadReportBriefing(
+  city: string,
+  period: string,
+  standard: AQIStandard,
+  fetcher: (c: string, p: string, s: AQIStandard) => Promise<ReportDataResponse> = (c, p, s) =>
+    api.getReportData(c, p, s)
+): Promise<{ data: ReportDataResponse | null; error: string | null }> {
+  try {
+    const data = await fetcher(city, period, standard);
+    return { data, error: null };
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error && err.message
+        ? err.message
+        : 'Failed to compile environmental intelligence report.';
+    return { data: null, error: msg };
+  }
+}
+
+export function openReportPdf(
+  url: string,
+  openWindow: (url: string, target?: string, features?: string) => unknown = (u, target, features) =>
+    window.open(u, target, features)
+): { opened: boolean; error: string | null } {
+  const cleanUrl = typeof url === 'string' ? url.trim() : '';
+  if (!cleanUrl || (!cleanUrl.startsWith('/') && !/^https?:\/\//i.test(cleanUrl))) {
+    return { opened: false, error: 'Unable to export PDF: report download URL is missing or invalid.' };
+  }
+  try {
+    const result = openWindow(cleanUrl, '_blank', 'noopener,noreferrer');
+    if (result === false) {
+      return { opened: false, error: 'Unable to open PDF export window.' };
+    }
+    return { opened: true, error: null };
+  } catch {
+    return { opened: false, error: 'Failed to launch PDF export download.' };
+  }
+}
 
 export const ReportsView: React.FC = () => {
   const { activeCity, standard } = useAQI();
   const [period, setPeriod] = useState<string>('Daily Summary');
   const [reportData, setReportData] = useState<ReportDataResponse | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const latestRequestIdRef = useRef<number>(0);
+
+  const fetchReport = useCallback(
+    async (isCancelled: () => boolean = () => false) => {
+      const requestId = ++latestRequestIdRef.current;
+      setLoading(true);
+      setLoadError(null);
+      setReportData(null);
+      setExportError(null);
+      const outcome = await loadReportBriefing(activeCity.name, period, standard);
+      if (isCancelled() || latestRequestIdRef.current !== requestId) return;
+      setReportData(outcome.data);
+      setLoadError(outcome.error);
+      setLoading(false);
+    },
+    [activeCity.name, period, standard]
+  );
 
   useEffect(() => {
-    setLoading(true);
-    api.getReportData(activeCity.name, period, standard)
-      .then((data) => setReportData(data))
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [activeCity, period, standard]);
+    let cancelled = false;
+    fetchReport(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchReport]);
 
   const handleDownloadPdf = () => {
     const url = api.getReportPdfUrl(activeCity.name, period, standard);
-    window.open(url, '_blank');
+    const outcome = openReportPdf(url);
+    setExportError(outcome.error);
   };
+
+  const resolved = reportData ? resolveReportDisplay(reportData) : null;
 
   return (
     <div className="space-y-6 max-w-5xl mx-auto pb-12 font-sans">
@@ -65,6 +207,16 @@ export const ReportsView: React.FC = () => {
         </div>
       </div>
 
+      {exportError && (
+        <div
+          role="alert"
+          className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center space-x-2.5 text-xs text-red-700 dark:text-red-300"
+        >
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>{exportError}</span>
+        </div>
+      )}
+
       {loading && (
         <div className="flex items-center justify-center p-16">
           <RefreshCw className="w-6 h-6 text-clima-accent dark:text-darkClima-accent animate-spin" />
@@ -74,7 +226,26 @@ export const ReportsView: React.FC = () => {
         </div>
       )}
 
-      {!loading && reportData && (
+      {!loading && loadError && (
+        <div
+          role="alert"
+          className="p-5 bg-red-500/10 border border-red-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs text-red-700 dark:text-red-300"
+        >
+          <div className="flex items-center space-x-2.5">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{loadError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => fetchReport()}
+            className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg font-medium transition-colors self-start sm:self-auto"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {!loading && !loadError && reportData && resolved && (
         <div className="bg-clima-surface dark:bg-darkClima-surface rounded-xl p-6 border border-clima-border dark:border-darkClima-border space-y-6 shadow-floating dark:shadow-floating-dark">
           {/* Document Header */}
           <div className="border-b border-clima-border dark:border-darkClima-border pb-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -86,15 +257,18 @@ export const ReportsView: React.FC = () => {
                 {reportData.city}
               </h3>
               <p className="text-xs text-clima-muted dark:text-darkClima-muted font-sans mt-0.5">
-                Reporting Interval: <span className="text-clima-text dark:text-darkClima-text font-medium">{reportData.period}</span> • Generated: {reportData.generated_at}
+                Reporting Interval: <span className="text-clima-text dark:text-darkClima-text font-medium">{reportData.period}</span> • Generated: {reportData.generated_at || 'Unavailable'}
               </p>
             </div>
             <div className="sm:text-right">
               <span className="text-xs text-clima-muted dark:text-darkClima-muted block font-sans">Standard Index ({standard.replace('_', ' ')})</span>
-              <span className="text-3xl font-extrabold font-mono text-clima-accent dark:text-darkClima-accent">
-                {reportData.aqi_value ?? '—'}
+              <span
+                className="text-3xl font-extrabold font-mono"
+                style={{ color: resolved.aqiColor }}
+              >
+                {resolved.aqiDisplay}
               </span>
-              <span className="text-xs font-semibold text-clima-text dark:text-darkClima-text block font-sans">{reportData.aqi_category}</span>
+              <span className="text-xs font-semibold text-clima-text dark:text-darkClima-text block font-sans">{resolved.aqiCategory}</span>
             </div>
           </div>
 
@@ -102,21 +276,29 @@ export const ReportsView: React.FC = () => {
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 bg-clima-subtle/80 dark:bg-darkClima-subtle/80 p-4 rounded-xl border border-clima-border dark:border-darkClima-border text-xs">
             <div>
               <span className="text-[10px] text-clima-muted dark:text-darkClima-muted font-sans block">Dominant Pollutant</span>
-              <span className="font-mono font-bold text-clima-text dark:text-darkClima-text text-sm mt-0.5 block">{reportData.dominant_pollutant || 'PM2.5'}</span>
+              <span className="font-mono font-bold text-clima-text dark:text-darkClima-text text-sm mt-0.5 block">{resolved.dominantPollutant}</span>
             </div>
             <div>
               <span className="text-[10px] text-clima-muted dark:text-darkClima-muted font-sans block">Primary Data Source</span>
-              <span className="font-sans text-clima-text dark:text-darkClima-text font-medium text-xs mt-0.5 block truncate" title={reportData.primary_source}>{reportData.primary_source}</span>
+              <span className="font-sans text-clima-text dark:text-darkClima-text font-medium text-xs mt-0.5 block truncate" title={resolved.primarySource}>{resolved.primarySource}</span>
             </div>
             <div>
               <span className="text-[10px] text-clima-muted dark:text-darkClima-muted font-sans block">Ingestion Mode</span>
-              <span className="font-sans text-[#0f6848] dark:text-[#4BBF87] font-semibold text-xs mt-0.5 block">
-                {reportData.is_ground_observation ? 'Ground Telemetry' : 'Model Estimate'}
+              <span
+                className={`font-semibold text-xs mt-0.5 block font-sans ${
+                  resolved.ingestionMode === 'Unavailable'
+                    ? 'text-clima-muted dark:text-darkClima-muted'
+                    : 'text-[#0f6848] dark:text-[#4BBF87]'
+                }`}
+              >
+                {resolved.ingestionMode}
               </span>
             </div>
             <div>
               <span className="text-[10px] text-clima-muted dark:text-darkClima-muted font-sans block">Validation Status</span>
-              <span className="font-sans text-clima-secondary dark:text-darkClima-secondary font-semibold text-xs mt-0.5 block">Quality Checked</span>
+              <span className="font-sans text-clima-secondary dark:text-darkClima-secondary font-semibold text-xs mt-0.5 block">
+                {resolved.validationStatus}
+              </span>
             </div>
           </div>
 
@@ -137,19 +319,29 @@ export const ReportsView: React.FC = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-clima-border/80 dark:divide-darkClima-border/80 font-sans">
-                  {Object.entries(reportData.measurements || {}).map(([key, val]: [string, ReportMeasurementItem]) => (
-                    <tr key={key} className="hover:bg-clima-subtle/40 dark:hover:bg-darkClima-subtle/40">
-                      <td className="px-4 py-2.5 font-bold font-mono text-clima-accent dark:text-darkClima-accent uppercase">{key}</td>
-                      <td className="px-4 py-2.5 font-mono text-clima-text dark:text-darkClima-text font-semibold">{val.value ?? 'Unavailable'}</td>
-                      <td className="px-4 py-2.5 font-mono text-clima-muted dark:text-darkClima-muted">{val.unit}</td>
-                      <td className="px-4 py-2.5 text-clima-text dark:text-darkClima-text">
-                        <span className="px-1.5 py-0.5 rounded bg-clima-subtle dark:bg-darkClima-subtle text-[10px] font-mono border border-clima-border dark:border-darkClima-border">
-                          {val.type}
-                        </span>
+                  {resolved.measurementEntries.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-4 py-4 text-center text-clima-muted dark:text-darkClima-muted">
+                        No pollutant measurements available for this briefing.
                       </td>
-                      <td className="px-4 py-2.5 text-clima-muted dark:text-darkClima-muted truncate max-w-xs">{val.source}</td>
                     </tr>
-                  ))}
+                  ) : (
+                    resolved.measurementEntries.map(([key, val]) => (
+                      <tr key={key} className="hover:bg-clima-subtle/40 dark:hover:bg-darkClima-subtle/40">
+                        <td className="px-4 py-2.5 font-bold font-mono text-clima-accent dark:text-darkClima-accent uppercase">{key}</td>
+                        <td className="px-4 py-2.5 font-mono text-clima-text dark:text-darkClima-text font-semibold">
+                          {formatReportConcentration(val?.value)}
+                        </td>
+                        <td className="px-4 py-2.5 font-mono text-clima-muted dark:text-darkClima-muted">{val?.unit || '—'}</td>
+                        <td className="px-4 py-2.5 text-clima-text dark:text-darkClima-text">
+                          <span className="px-1.5 py-0.5 rounded bg-clima-subtle dark:bg-darkClima-subtle text-[10px] font-mono border border-clima-border dark:border-darkClima-border">
+                            {val?.type || 'Unavailable'}
+                          </span>
+                        </td>
+                        <td className="px-4 py-2.5 text-clima-muted dark:text-darkClima-muted truncate max-w-xs">{val?.source || 'Unavailable'}</td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>
@@ -160,7 +352,7 @@ export const ReportsView: React.FC = () => {
             <h4 className="text-xs font-semibold uppercase tracking-wider text-clima-text dark:text-darkClima-text font-sans">
               Public Health Advisory Summary
             </h4>
-            <p className="text-xs text-clima-muted dark:text-darkClima-muted leading-relaxed font-sans">{reportData.health_advisory}</p>
+            <p className="text-xs text-clima-muted dark:text-darkClima-muted leading-relaxed font-sans">{resolved.healthAdvisory}</p>
           </div>
         </div>
       )}

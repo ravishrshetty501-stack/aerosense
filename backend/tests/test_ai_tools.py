@@ -1,5 +1,7 @@
 import pytest
+from unittest.mock import AsyncMock, patch
 from app.services.ai_service import ai_service
+from app.services.providers.base import AirQualityResponse, LocationInfo
 
 @pytest.mark.asyncio
 async def test_tool_get_air_quality():
@@ -88,3 +90,101 @@ async def test_ai_chat_grounded_response():
     assert "response" in resp
     assert len(resp["response"]) > 50
     assert "Tokyo" in resp["response"]
+
+
+def _make_mock_aq_response(us_epa_result: dict) -> AirQualityResponse:
+    return AirQualityResponse(
+        location=LocationInfo(name="TestCity", city="TestCity", latitude=35.0, longitude=139.0),
+        measurements={},
+        aqi_standard_results={"US_EPA": us_epa_result},
+        dominant_pollutant=None,
+        hourly_history=[],
+        forecast=[],
+        primary_source="Test Provider",
+        data_freshness_minutes=5,
+        is_ground_observation=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_tool_get_health_guidance_aqi_edge_cases():
+    """Verify get_health_guidance handles None/missing/non-finite AQI safely and preserves 0 and all valid bands."""
+    mock_city = [{"name": "TestCity", "latitude": 35.0, "longitude": 139.0}]
+
+    unavailable_cases = [
+        {"aqi": None, "category": "Good", "advisory": None},
+        {},  # Missing aqi key
+        {"aqi": float("nan"), "category": "Moderate"},
+        {"aqi": float("inf"), "category": "Severe"},
+        {"aqi": float("-inf"), "category": "Good"},
+        {"aqi": 10**400, "category": "Hazardous"},
+        {"aqi": -10**400, "category": "Good"},
+        {"aqi": True, "category": "Good"},
+    ]
+
+    for us_epa_payload in unavailable_cases:
+        with (
+            patch("app.services.providers.manager.data_manager.search_cities", new=AsyncMock(return_value=mock_city)),
+            patch(
+                "app.services.providers.manager.data_manager.get_unified_air_quality",
+                new=AsyncMock(return_value=_make_mock_aq_response(us_epa_payload)),
+            ),
+        ):
+            res = await ai_service.execute_tool("get_health_guidance", {"location": "TestCity", "activity": "running"})
+
+        assert res["aqi"] is None
+        assert res["category"] == "Unavailable"
+        assert "Unavailable" in res["safety_assessment"]
+        assert "Safe" not in res["safety_assessment"]
+
+    valid_cases = [
+        (0, "Good", "Safe"),
+        (50, "Good", "Safe"),
+        (100, "Moderate", "Acceptable with caution"),
+        (125, "Unhealthy for Sensitive Groups", "Moderate Risk for sensitive groups"),
+        (200, "Unhealthy", "Unhealthy - Avoid prolonged exertion"),
+        (260, "Very Unhealthy", "Dangerous - Avoid outdoor activities"),
+    ]
+
+    for aqi_val, expected_cat, expected_safety in valid_cases:
+        with (
+            patch("app.services.providers.manager.data_manager.search_cities", new=AsyncMock(return_value=mock_city)),
+            patch(
+                "app.services.providers.manager.data_manager.get_unified_air_quality",
+                new=AsyncMock(return_value=_make_mock_aq_response({"aqi": aqi_val, "category": expected_cat, "advisory": "Official note"})),
+            ),
+        ):
+            res = await ai_service.execute_tool("get_health_guidance", {"location": "TestCity", "activity": "running"})
+
+        assert res["aqi"] == aqi_val
+        assert res["category"] == expected_cat
+        assert res["safety_assessment"] == expected_safety
+
+
+@pytest.mark.asyncio
+async def test_ai_service_unavailable_never_fabricates_42_and_handles_null_tool_args():
+    mock_city = [{"name": "TestCity", "latitude": 35.0, "longitude": 139.0}]
+    unavail_resp = _make_mock_aq_response({"aqi": None, "category": "Unavailable", "advisory": None})
+    with (
+        patch("app.services.providers.manager.data_manager.search_cities", new=AsyncMock(return_value=mock_city)),
+        patch("app.services.providers.manager.data_manager.get_unified_air_quality", new=AsyncMock(return_value=unavail_resp)),
+    ):
+        det = await ai_service._deterministic_reasoning("How is air in TestCity?", "TestCity")
+        assert "42" not in det["response"]
+        assert "Unavailable" in det["response"]
+        assert "None" not in det["response"]
+        assert det["grounding_data"]["aqi"] is None
+        assert det["grounding_data"]["category"] == "Unavailable"
+        assert det["grounding_data"]["dominant_pollutant"] == "Unavailable"
+
+    # Non-string / null arguments must return clean error or safe default rather than AttributeError
+    assert "error" in await ai_service.execute_tool("get_air_quality", {"location": None})
+    assert "error" in await ai_service.execute_tool("get_pollution_trends", {"location": None, "pollutant": 123})
+    with (
+        patch("app.services.providers.manager.data_manager.search_cities", new=AsyncMock(return_value=mock_city)),
+        patch("app.services.providers.manager.data_manager.get_unified_air_quality", new=AsyncMock(return_value=unavail_resp)),
+    ):
+        trend_res = await ai_service.execute_tool("get_pollution_trends", {"location": "TestCity", "pollutant": None})
+        assert trend_res["pollutant"] == "pm25"
+        health_res = await ai_service.execute_tool("get_health_guidance", {"location": "TestCity", "activity": 123})
+        assert health_res["activity"] == "running"

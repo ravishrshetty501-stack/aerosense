@@ -1,8 +1,106 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
 import { CityComparisonItem } from '../../types/airQuality';
-import { GitCompare, Plus, Trash2, ArrowUpRight, ArrowDownRight, RefreshCw, Radio } from 'lucide-react';
+import { getAqiScaleColor } from '../../utils/airQualityHelpers';
+import { GitCompare, Plus, Trash2, ArrowUpRight, ArrowDownRight, RefreshCw } from 'lucide-react';
+
+function isFiniteNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
+
+function normalizeFiniteNumber(val: number): number {
+  return Object.is(val, -0) ? 0 : val;
+}
+
+export function formatComparisonPollutant(
+  val: unknown,
+  unit: string = '',
+  fallback: string = 'Unavailable'
+): string {
+  if (!isFiniteNumber(val)) return fallback;
+  const normalized = normalizeFiniteNumber(val);
+  return unit ? `${normalized} ${unit}` : String(normalized);
+}
+
+export function computeComparisonAqiBounds(items: CityComparisonItem[]): {
+  validCount: number;
+  minAqi: number | null;
+  maxAqi: number | null;
+} {
+  const validAqis = items
+    .map((c) => c.aqi)
+    .filter(isFiniteNumber)
+    .map(normalizeFiniteNumber);
+
+  if (validAqis.length === 0) {
+    return { validCount: 0, minAqi: null, maxAqi: null };
+  }
+
+  return {
+    validCount: validAqis.length,
+    minAqi: Math.min(...validAqis),
+    maxAqi: Math.max(...validAqis),
+  };
+}
+
+export interface ComparisonItemDisplay {
+  hasFiniteAqi: boolean;
+  aqiDisplay: number | string;
+  aqiColor: string;
+  category: string;
+  dominantPollutant: string;
+  primarySource: string;
+  cardSourceLabel: string;
+  tableSourceLabel: string;
+}
+
+export function resolveComparisonItemDisplay(item: CityComparisonItem): ComparisonItemDisplay {
+  const hasFiniteAqi = isFiniteNumber(item.aqi);
+  const aqiDisplay = hasFiniteAqi ? normalizeFiniteNumber(item.aqi as number) : '—';
+  const aqiColor = hasFiniteAqi
+    ? item.color || getAqiScaleColor(item.aqi)
+    : '#647570';
+  const category = item.category?.trim() ? item.category : 'Unavailable';
+  const dominantPollutant = item.dominant_pollutant?.trim() ? item.dominant_pollutant : 'Unavailable';
+  const primarySource = item.primary_source?.trim() ? item.primary_source : 'Unavailable';
+
+  const hasAnyFiniteReading =
+    hasFiniteAqi || [item.pm25, item.pm10, item.no2, item.o3].some(isFiniteNumber);
+
+  let cardSourceLabel = 'Unavailable';
+  let tableSourceLabel = 'Unavailable';
+  if (hasAnyFiniteReading) {
+    if (item.is_ground_observation) {
+      cardSourceLabel = 'Ground Sensor';
+      tableSourceLabel = 'Ground Observation';
+    } else {
+      cardSourceLabel = 'Model Estimate';
+      tableSourceLabel = 'Atmospheric Model';
+    }
+  }
+
+  return {
+    hasFiniteAqi,
+    aqiDisplay,
+    aqiColor,
+    category,
+    dominantPollutant,
+    primarySource,
+    cardSourceLabel,
+    tableSourceLabel,
+  };
+}
+
+const COMPARISON_POLLUTANT_ROWS: Array<{
+  key: 'pm25' | 'pm10' | 'no2' | 'o3';
+  label: string;
+}> = [
+  { key: 'pm25', label: 'PM2.5 (Fine Particles):' },
+  { key: 'pm10', label: 'PM10 (Coarse Particles):' },
+  { key: 'no2', label: 'NO₂ (Nitrogen Dioxide):' },
+  { key: 'o3', label: 'O₃ (Tropospheric Ozone):' },
+];
 
 export const CityComparisonView: React.FC = () => {
   const { activeCity, standard } = useAQI();
@@ -19,6 +117,9 @@ export const CityComparisonView: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [newCityInput, setNewCityInput] = useState('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const latestRequestIdRef = useRef<number>(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const resolvedAliasMapRef = useRef<Record<string, string>>({});
 
   // Sync if active city changes and isn't already present
   useEffect(() => {
@@ -32,23 +133,49 @@ export const CityComparisonView: React.FC = () => {
   }, [activeCity.name]);
 
   const fetchComparison = async (cities: string[]) => {
+    abortControllerRef.current?.abort();
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+    const requestId = ++latestRequestIdRef.current;
     setLoading(true);
     setErrorMsg(null);
+    setComparisonData([]);
     try {
-      const res = await api.compareCities(cities, standard);
-      setComparisonData(res.comparison || []);
+      const res = await api.compareCities(cities, standard, { signal: controller.signal });
+      if (latestRequestIdRef.current !== requestId) return;
+      const items = res.comparison || [];
+      const aliasMap: Record<string, string> = {};
+      items.forEach((item, idx) => {
+        if (item?.city && cities[idx]) {
+          aliasMap[item.city.trim().toLowerCase()] = cities[idx].trim().toLowerCase();
+        }
+      });
+      resolvedAliasMapRef.current = aliasMap;
+      setComparisonData(items);
     } catch (e: unknown) {
+      if (e instanceof Error && e.name === 'AbortError') return;
+      if (latestRequestIdRef.current !== requestId) return;
       console.error(e);
+      setComparisonData([]);
       setErrorMsg('Failed to load comparison data. Please try again.');
     } finally {
-      setLoading(false);
+      if (latestRequestIdRef.current === requestId) {
+        setLoading(false);
+      }
     }
   };
 
   useEffect(() => {
     if (citiesToCompare.length > 0) {
       fetchComparison(citiesToCompare);
+    } else {
+      abortControllerRef.current?.abort();
+      setComparisonData([]);
+      setLoading(false);
     }
+    return () => {
+      abortControllerRef.current?.abort();
+    };
   }, [citiesToCompare, standard]);
 
   const handleAddCity = (e: React.FormEvent) => {
@@ -73,15 +200,23 @@ export const CityComparisonView: React.FC = () => {
     setErrorMsg(null);
   };
 
-  const handleRemoveCity = (cityToRemove: string) => {
+  const handleRemoveCity = (cityToRemove: string, itemIndex?: number) => {
     if (citiesToCompare.length <= 1) return;
-    setCitiesToCompare(citiesToCompare.filter((c) => c.toLowerCase() !== cityToRemove.toLowerCase()));
+    const normRemove = cityToRemove.trim().toLowerCase();
+    const mappedOriginal = resolvedAliasMapRef.current[normRemove];
+    const filtered = citiesToCompare.filter(
+      (c, idx) =>
+        c.trim().toLowerCase() !== normRemove &&
+        (!mappedOriginal || c.trim().toLowerCase() !== mappedOriginal) &&
+        (itemIndex === undefined || idx !== itemIndex || comparisonData.length !== citiesToCompare.length)
+    );
+    if (filtered.length > 0 && filtered.length !== citiesToCompare.length) {
+      setCitiesToCompare(filtered);
+    }
   };
 
   // Find lowest and highest AQI for relative highlighting
-  const validAqis = comparisonData.map((c) => c.aqi).filter((a) => typeof a === 'number');
-  const minAqi = validAqis.length > 0 ? Math.min(...validAqis) : null;
-  const maxAqi = validAqis.length > 0 ? Math.max(...validAqis) : null;
+  const { validCount, minAqi, maxAqi } = computeComparisonAqiBounds(comparisonData);
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12 font-sans">
@@ -140,11 +275,28 @@ export const CityComparisonView: React.FC = () => {
       )}
 
       {/* Comparison Cards Grid */}
+      {!loading && errorMsg && comparisonData.length === 0 && (
+        <div
+          role="alert"
+          className="p-6 bg-red-500/10 border border-red-500/30 rounded-xl flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-red-700 dark:text-red-300 font-sans"
+        >
+          <span>{errorMsg}</span>
+          <button
+            type="button"
+            onClick={() => fetchComparison(citiesToCompare)}
+            className="px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 rounded-lg font-medium transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
       {!loading && comparisonData.length > 0 && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
           {comparisonData.map((item, idx) => {
-            const isLowest = validAqis.length > 1 && item.aqi === minAqi;
-            const isHighest = validAqis.length > 1 && item.aqi === maxAqi;
+            const display = resolveComparisonItemDisplay(item);
+            const isLowest = validCount > 1 && display.hasFiniteAqi && display.aqiDisplay === minAqi;
+            const isHighest = validCount > 1 && display.hasFiniteAqi && display.aqiDisplay === maxAqi;
 
             return (
               <div
@@ -173,8 +325,9 @@ export const CityComparisonView: React.FC = () => {
 
                     {citiesToCompare.length > 1 && (
                       <button
-                        onClick={() => handleRemoveCity(item.city)}
+                        onClick={() => handleRemoveCity(item.city, idx)}
                         title="Remove city"
+                        aria-label={`Remove ${item.city} from comparison`}
                         className="text-clima-muted dark:text-darkClima-muted hover:text-[#C94E55] p-1.5 rounded-md hover:bg-clima-subtle dark:hover:bg-darkClima-subtle transition-colors"
                       >
                         <Trash2 className="w-4 h-4" />
@@ -186,18 +339,18 @@ export const CityComparisonView: React.FC = () => {
                   <div className="mt-5 flex items-baseline space-x-3.5">
                     <span
                       className="text-4xl font-extrabold font-mono tracking-tight"
-                      style={{ color: item.color || '#23966B' }}
+                      style={{ color: display.aqiColor }}
                     >
-                      {item.aqi !== null && item.aqi !== undefined ? item.aqi : '—'}
+                      {display.aqiDisplay}
                     </span>
                     <div>
                       <span className="text-sm font-semibold text-clima-text dark:text-darkClima-text block font-sans">
-                        {item.category || 'Unavailable'}
+                        {display.category}
                       </span>
                       <span className="text-[11px] text-clima-muted dark:text-darkClima-muted font-sans">
                         Dominant:{' '}
                         <span className="text-clima-accent dark:text-darkClima-accent font-mono font-medium">
-                          {item.dominant_pollutant || 'N/A'}
+                          {display.dominantPollutant}
                         </span>
                       </span>
                     </div>
@@ -205,40 +358,24 @@ export const CityComparisonView: React.FC = () => {
 
                   {/* Concentration Parameter Breakdown */}
                   <div className="mt-5 pt-4 border-t border-clima-border dark:border-darkClima-border space-y-2.5 text-xs font-sans">
-                    <div className="flex justify-between items-center text-clima-muted dark:text-darkClima-muted">
-                      <span>PM2.5 (Fine Particles):</span>
-                      <span className="text-clima-text dark:text-darkClima-text font-mono font-semibold">
-                        {item.pm25 !== null && item.pm25 !== undefined ? `${item.pm25} µg/m³` : 'Unavailable'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-clima-muted dark:text-darkClima-muted">
-                      <span>PM10 (Coarse Particles):</span>
-                      <span className="text-clima-text dark:text-darkClima-text font-mono font-semibold">
-                        {item.pm10 !== null && item.pm10 !== undefined ? `${item.pm10} µg/m³` : 'Unavailable'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-clima-muted dark:text-darkClima-muted">
-                      <span>NO₂ (Nitrogen Dioxide):</span>
-                      <span className="text-clima-text dark:text-darkClima-text font-mono font-semibold">
-                        {item.no2 !== null && item.no2 !== undefined ? `${item.no2} µg/m³` : 'Unavailable'}
-                      </span>
-                    </div>
-                    <div className="flex justify-between items-center text-clima-muted dark:text-darkClima-muted">
-                      <span>O₃ (Tropospheric Ozone):</span>
-                      <span className="text-clima-text dark:text-darkClima-text font-mono font-semibold">
-                        {item.o3 !== null && item.o3 !== undefined ? `${item.o3} µg/m³` : 'Unavailable'}
-                      </span>
-                    </div>
+                    {COMPARISON_POLLUTANT_ROWS.map((row) => (
+                      <div key={row.key} className="flex justify-between items-center text-clima-muted dark:text-darkClima-muted">
+                        <span>{row.label}</span>
+                        <span className="text-clima-text dark:text-darkClima-text font-mono font-semibold">
+                          {formatComparisonPollutant(item[row.key], 'µg/m³')}
+                        </span>
+                      </div>
+                    ))}
                   </div>
                 </div>
 
                 {/* Footer Attribution */}
                 <div className="mt-5 pt-3 border-t border-clima-border dark:border-darkClima-border text-[10px] text-clima-muted dark:text-darkClima-muted flex items-center justify-between font-sans">
-                  <span className="truncate max-w-[200px]" title={item.primary_source || undefined}>
-                    {item.primary_source}
+                  <span className="truncate max-w-[200px]" title={display.primarySource}>
+                    {display.primarySource}
                   </span>
                   <span className="px-1.5 py-0.5 rounded bg-clima-subtle dark:bg-darkClima-subtle text-clima-text dark:text-darkClima-text font-mono">
-                    {item.is_ground_observation ? 'Ground Sensor' : 'Model Estimate'}
+                    {display.cardSourceLabel}
                   </span>
                 </div>
               </div>
@@ -268,20 +405,23 @@ export const CityComparisonView: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-clima-border/60 dark:divide-darkClima-border/60 font-sans">
-                {comparisonData.map((c, i) => (
-                  <tr key={i} className="hover:bg-clima-subtle/40 dark:hover:bg-darkClima-subtle/40 transition-colors">
-                    <td className="px-4 py-3 font-semibold text-clima-text dark:text-darkClima-text">{c.city}</td>
-                    <td className="px-4 py-3 font-mono font-bold" style={{ color: c.color || '#23966B' }}>
-                      {c.aqi ?? '—'} ({c.category})
-                    </td>
-                    <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{c.pm25 ?? 'Unavailable'}</td>
-                    <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{c.pm10 ?? 'Unavailable'}</td>
-                    <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{c.no2 ?? 'Unavailable'}</td>
-                    <td className="px-4 py-3 text-clima-muted dark:text-darkClima-muted">
-                      {c.is_ground_observation ? 'Ground Observation' : 'Atmospheric Model'}
-                    </td>
-                  </tr>
-                ))}
+                {comparisonData.map((c, i) => {
+                  const display = resolveComparisonItemDisplay(c);
+                  return (
+                    <tr key={`${c.city}-${i}`} className="hover:bg-clima-subtle/40 dark:hover:bg-darkClima-subtle/40 transition-colors">
+                      <td className="px-4 py-3 font-semibold text-clima-text dark:text-darkClima-text">{c.city}</td>
+                      <td className="px-4 py-3 font-mono font-bold" style={{ color: display.aqiColor }}>
+                        {display.aqiDisplay} ({display.category})
+                      </td>
+                      <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{formatComparisonPollutant(c.pm25)}</td>
+                      <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{formatComparisonPollutant(c.pm10)}</td>
+                      <td className="px-4 py-3 font-mono text-clima-text dark:text-darkClima-text">{formatComparisonPollutant(c.no2)}</td>
+                      <td className="px-4 py-3 text-clima-muted dark:text-darkClima-muted">
+                        {display.tableSourceLabel}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

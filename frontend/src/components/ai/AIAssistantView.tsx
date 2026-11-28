@@ -123,6 +123,41 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
     let tableRows: string[][] = [];
     let inTable = false;
 
+    const flushTable = (keySuffix: string) => {
+      if (tableRows.length > 0) {
+        const header = tableRows[0];
+        const body = tableRows.slice(1);
+        elements.push(
+          <div key={`table-${keySuffix}`} className="my-3 overflow-x-auto rounded-lg border border-clima-border dark:border-darkClima-border shadow-sm">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-clima-subtle dark:bg-darkClima-subtle text-clima-text dark:text-darkClima-text">
+                <tr>
+                  {header.map((h, i) => (
+                    <th key={i} className="px-3 py-2 font-semibold">
+                      {h.replace(/\*\*/g, '')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-clima-border dark:divide-darkClima-border bg-clima-surface dark:bg-darkClima-surface">
+                {body.map((row, rIdx) => (
+                  <tr key={rIdx} className="hover:bg-clima-subtle/50 dark:hover:bg-darkClima-subtle/50">
+                    {row.map((cell, cIdx) => (
+                      <td key={cIdx} className="px-3 py-2 font-mono text-[11px] text-clima-text dark:text-darkClima-text">
+                        {cell.replace(/\*\*/g, '')}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        tableRows = [];
+      }
+      inTable = false;
+    };
+
     lines.forEach((line, idx) => {
       // Table row detection
       if (line.trim().startsWith('|') && line.trim().endsWith('|')) {
@@ -138,38 +173,7 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
         inTable = true;
         return;
       } else if (inTable) {
-        if (tableRows.length > 0) {
-          const header = tableRows[0];
-          const body = tableRows.slice(1);
-          elements.push(
-            <div key={`table-${idx}`} className="my-3 overflow-x-auto rounded-lg border border-clima-border dark:border-darkClima-border shadow-sm">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-clima-subtle dark:bg-darkClima-subtle text-clima-text dark:text-darkClima-text">
-                  <tr>
-                    {header.map((h, i) => (
-                      <th key={i} className="px-3 py-2 font-semibold">
-                        {h.replace(/\*\*/g, '')}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-clima-border dark:divide-darkClima-border bg-clima-surface dark:bg-darkClima-surface">
-                  {body.map((row, rIdx) => (
-                    <tr key={rIdx} className="hover:bg-clima-subtle/50 dark:hover:bg-darkClima-subtle/50">
-                      {row.map((cell, cIdx) => (
-                        <td key={cIdx} className="px-3 py-2 font-mono text-[11px] text-clima-text dark:text-darkClima-text">
-                          {cell.replace(/\*\*/g, '')}
-                        </td>
-                      ))}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          );
-          tableRows = [];
-        }
-        inTable = false;
+        flushTable(String(idx));
       }
 
       // Headers
@@ -236,6 +240,10 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
       );
     });
 
+    if (inTable) {
+      flushTable('end');
+    }
+
     return elements;
   };
 
@@ -253,7 +261,8 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
               <div>
                 <div className="text-xs font-bold text-clima-text dark:text-darkClima-text">{activeCity.name}</div>
                 <div className="text-[10px] text-clima-muted dark:text-darkClima-muted font-mono">
-                  {activeCity.latitude.toFixed(2)}°N, {activeCity.longitude.toFixed(2)}°E
+                  {Math.abs(activeCity.latitude).toFixed(2)}°{activeCity.latitude >= 0 ? 'N' : 'S'},{' '}
+                  {Math.abs(activeCity.longitude).toFixed(2)}°{activeCity.longitude >= 0 ? 'E' : 'W'}
                 </div>
               </div>
             </div>
@@ -278,7 +287,7 @@ How can I assist you with **${activeCity.name}** or any other city worldwide?`,
         </div>
 
         <div className="p-2.5 bg-clima-surface dark:bg-darkClima-surface rounded-lg border border-clima-border dark:border-darkClima-border text-[10px] font-mono text-clima-muted dark:text-darkClima-muted">
-          <div>Provider: Google Gemini 1.5 Flash</div>
+          <div>Engine: Google Gemini 2.5 Flash</div>
           <div>Tools: 8 Grounded Handlers</div>
         </div>
       </div>

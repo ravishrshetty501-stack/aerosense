@@ -21,16 +21,40 @@ function getAuthHeaders(): HeadersInit {
   return headers;
 }
 
+async function parseApiErrorMessage(res: Response, fallback: string): Promise<string> {
+  try {
+    const err = await res.json();
+    if (typeof err?.detail === 'string' && err.detail.trim()) {
+      return err.detail;
+    }
+    if (Array.isArray(err?.detail) && err.detail.length > 0) {
+      const msgs = err.detail
+        .map((item: { msg?: unknown }) => (typeof item?.msg === 'string' ? item.msg : ''))
+        .filter(Boolean);
+      if (msgs.length > 0) return msgs.join('; ');
+    }
+  } catch {
+    // Response is non-JSON (e.g., 502 HTML or empty 429 body); return contextual fallback
+  }
+  return res.status ? `${fallback} (HTTP ${res.status})` : fallback;
+}
+
 export const api = {
   // Air Quality
-  async getCurrentAirQuality(params: { lat?: number; lon?: number; city?: string; standard?: AQIStandard }): Promise<AirQualityResponse> {
+  async getCurrentAirQuality(
+    params: { lat?: number; lon?: number; city?: string; standard?: AQIStandard },
+    options?: { signal?: AbortSignal }
+  ): Promise<AirQualityResponse> {
     const query = new URLSearchParams();
     if (params.lat !== undefined) query.set('lat', params.lat.toString());
     if (params.lon !== undefined) query.set('lon', params.lon.toString());
     if (params.city) query.set('city', params.city);
     if (params.standard) query.set('standard', params.standard);
     
-    const res = await fetch(`${API_BASE}/air-quality/current?${query.toString()}`);
+    const res = await fetch(
+      `${API_BASE}/air-quality/current?${query.toString()}`,
+      options?.signal ? { signal: options.signal } : undefined
+    );
     if (!res.ok) throw new Error('Failed to fetch air quality data');
     return res.json();
   },
@@ -56,11 +80,18 @@ export const api = {
   },
 
   // Analytics & Comparison
-  async compareCities(cities: string[], standard: AQIStandard = 'US_EPA'): Promise<CityComparisonResponse> {
+  async compareCities(
+    cities: string[],
+    standard: AQIStandard = 'US_EPA',
+    options?: { signal?: AbortSignal }
+  ): Promise<CityComparisonResponse> {
     const params = new URLSearchParams();
     cities.forEach(c => params.append('cities', c));
     params.set('standard', standard);
-    const res = await fetch(`${API_BASE}/analytics/compare?${params.toString()}`);
+    const res = await fetch(
+      `${API_BASE}/analytics/compare?${params.toString()}`,
+      options?.signal ? { signal: options.signal } : undefined
+    );
     if (!res.ok) throw new Error('Failed to compare cities');
     return res.json();
   },
@@ -94,8 +125,7 @@ export const api = {
       body: JSON.stringify({ email, password }),
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Login failed');
+      throw new Error(await parseApiErrorMessage(res, 'Login failed'));
     }
     return res.json();
   },
@@ -107,8 +137,7 @@ export const api = {
       body: JSON.stringify(data),
     });
     if (!res.ok) {
-      const err = await res.json();
-      throw new Error(err.detail || 'Registration failed');
+      throw new Error(await parseApiErrorMessage(res, 'Registration failed'));
     }
     return res.json();
   },
@@ -124,7 +153,9 @@ export const api = {
   // Alerts
   async getAlertRules(): Promise<AlertRule[]> {
     const res = await fetch(`${API_BASE}/alerts/rules`, { headers: getAuthHeaders() });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(await parseApiErrorMessage(res, 'Failed to load alert rules'));
+    }
     return res.json();
   },
 
@@ -139,15 +170,18 @@ export const api = {
   },
 
   async deleteAlertRule(ruleId: string): Promise<void> {
-    await fetch(`${API_BASE}/alerts/rules/${ruleId}`, {
+    const res = await fetch(`${API_BASE}/alerts/rules/${encodeURIComponent(ruleId)}`, {
       method: 'DELETE',
       headers: getAuthHeaders(),
     });
+    if (!res.ok) throw new Error('Failed to delete alert rule');
   },
 
   async getAlertEvents(): Promise<AlertEvent[]> {
     const res = await fetch(`${API_BASE}/alerts/events`, { headers: getAuthHeaders() });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      throw new Error(await parseApiErrorMessage(res, 'Failed to load alert events'));
+    }
     return res.json();
   },
 
@@ -159,7 +193,10 @@ export const api = {
   },
 
   getReportPdfUrl(city: string, period: string, standard: AQIStandard): string {
-    return `${API_BASE}/reports/export/pdf?city=${encodeURIComponent(city)}&period=${encodeURIComponent(period)}&standard=${standard}`;
+    const cleanCity = typeof city === 'string' ? city.trim() : '';
+    if (!cleanCity) return '';
+    const cleanPeriod = typeof period === 'string' && period.trim() ? period.trim() : 'Daily Summary';
+    return `${API_BASE}/reports/export/pdf?city=${encodeURIComponent(cleanCity)}&period=${encodeURIComponent(cleanPeriod)}&standard=${encodeURIComponent(standard)}`;
   },
 
   // System

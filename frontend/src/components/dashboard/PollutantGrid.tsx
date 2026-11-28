@@ -23,20 +23,21 @@ export const PollutantGrid: React.FC = () => {
           Monitored Environmental Parameters
         </h3>
         <span className="text-xs text-slate-400 font-mono">
-          {Object.keys(airQuality.measurements).length} Active Sensors
+          {Object.values(airQuality.measurements).filter((m) => Boolean(m) && typeof m.value === 'number' && Number.isFinite(m.value)).length} Active Sensors
         </span>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {Object.entries(pollutantConfigs).map(([key, cfg]) => {
           const meas = airQuality.measurements[key];
-          const hasValue = meas && meas.value !== null;
-          const isGround = meas && meas.measurement_type === 'ground_observation';
+          const hasValue = Boolean(meas) && typeof meas.value === 'number' && Number.isFinite(meas.value);
+          const displayValue = hasValue ? (Object.is(meas.value, -0) ? 0 : meas.value) : '—';
+          const isGround = hasValue && meas.measurement_type === 'ground_observation';
 
           return (
             <div
               key={key}
-              className="card-metric rounded-lg p-4 border border-slate-800/80 hover:border-slate-700 transition-colors"
+              className="bg-navy-900/95 rounded-lg p-4 border border-slate-800/80 hover:border-slate-700 transition-colors"
             >
               <div className="flex items-center justify-between">
                 <span className="text-base font-bold font-mono text-cyanAccent">
@@ -60,10 +61,10 @@ export const PollutantGrid: React.FC = () => {
 
               <div className="mt-3 flex items-baseline space-x-2">
                 <span className="text-2xl sm:text-3xl font-bold font-mono text-slate-100">
-                  {hasValue ? meas.value : '—'}
+                  {displayValue}
                 </span>
                 <span className="text-xs font-mono text-slate-400">
-                  {hasValue ? meas.unit : ''}
+                  {hasValue ? meas.unit || '' : ''}
                 </span>
               </div>
 

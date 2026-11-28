@@ -15,6 +15,15 @@ import {
   ComposedChart
 } from 'recharts';
 import { LineChart, AlertTriangle, Activity, Zap, Download, RefreshCw, Info } from 'lucide-react';
+import {
+  buildTrajectoryCsv,
+  buildTrajectorySeries,
+  detectConcentrationSpike,
+  formatFiniteDecimal,
+  hasValidTrajectoryData,
+  sanitizeDownloadFilename,
+  selectChartBDistribution,
+} from '../../utils/airQualityHelpers';
 
 const pollutantMeta: Record<'pm25' | 'pm10' | 'no2' | 'o3', { label: string; full: string; unit: string; color: string }> = {
   o3: { label: 'O₃', full: 'Ground-Level Ozone (O₃)', unit: 'µg/m³', color: '#8E44AD' },
@@ -25,22 +34,11 @@ const pollutantMeta: Record<'pm25' | 'pm10' | 'no2' | 'o3', { label: string; ful
 
 export const AnalyticsView: React.FC = () => {
   const { airQuality, activeCity, loading, error, refreshData } = useAQI();
-  const { theme } = useTheme();
+  const { resolvedTheme } = useTheme();
   const [selectedPollutant, setSelectedPollutant] = useState<'o3' | 'pm25' | 'pm10' | 'no2'>('o3');
   const [timeRange, setTimeRange] = useState<'24h' | '48h' | '72h'>('72h');
 
-  const isDark = theme === 'dark';
-
-  // Format timestamp helper
-  const formatTimeLabel = (isoString: string): string => {
-    try {
-      const d = new Date(isoString);
-      if (isNaN(d.getTime())) return isoString;
-      return d.toLocaleTimeString([], { month: 'numeric', day: 'numeric', hour: '2-digit' });
-    } catch {
-      return isoString;
-    }
-  };
+  const isDark = resolvedTheme === 'dark';
 
   // Process raw hourly history and forecast data
   const rawHistory = useMemo(() => airQuality?.hourly_history || [], [airQuality]);
@@ -48,83 +46,42 @@ export const AnalyticsView: React.FC = () => {
 
   const hasHistory = rawHistory.length > 0;
   const hasForecast = rawForecast.length > 0;
+  const isSynthesizedHistory = useMemo(
+    () => rawHistory.some((pt) => Boolean(pt?.is_synthesized) || pt?.type === 'ground_anchored_reanalysis'),
+    [rawHistory]
+  );
 
-  // Transform historical points
-  const historySeries = useMemo(() => {
-    return rawHistory.map((pt) => {
-      const val = pt[selectedPollutant];
-      return {
-        time: formatTimeLabel(pt.time),
-        isoTime: pt.time,
-        observed: typeof val === 'number' && !isNaN(val) ? Number(val.toFixed(1)) : null,
-        forecast: null as number | null,
-        isForecast: false,
-        pm25: typeof pt.pm25 === 'number' ? Number(pt.pm25.toFixed(1)) : null,
-        pm10: typeof pt.pm10 === 'number' ? Number(pt.pm10.toFixed(1)) : null,
-        no2: typeof pt.no2 === 'number' ? Number(pt.no2.toFixed(1)) : null,
-        o3: typeof pt.o3 === 'number' ? Number(pt.o3.toFixed(1)) : null,
-      };
-    });
-  }, [rawHistory, selectedPollutant]);
-
-  // Transform forecast points (up to 24h for standard view)
-  const forecastSeries = useMemo(() => {
-    return rawForecast.slice(0, 24).map((pt) => {
-      const val = pt[selectedPollutant];
-      return {
-        time: formatTimeLabel(pt.time),
-        isoTime: pt.time,
-        observed: null as number | null,
-        forecast: typeof val === 'number' && !isNaN(val) ? Number(val.toFixed(1)) : null,
-        isForecast: true,
-        pm25: typeof pt.pm25 === 'number' ? Number(pt.pm25.toFixed(1)) : null,
-        pm10: typeof pt.pm10 === 'number' ? Number(pt.pm10.toFixed(1)) : null,
-        no2: typeof pt.no2 === 'number' ? Number(pt.no2.toFixed(1)) : null,
-        o3: typeof pt.o3 === 'number' ? Number(pt.o3.toFixed(1)) : null,
-      };
-    });
-  }, [rawForecast, selectedPollutant]);
-
-  // Create contiguous trajectory for Chart A
-  const combinedTrajectory = useMemo(() => {
-    if (hasHistory && hasForecast && historySeries.length > 0) {
-      const lastHistory = historySeries[historySeries.length - 1];
-      // Bridge point: duplicate the last observation into forecast to connect lines smoothly
-      const bridgePoint = {
-        ...lastHistory,
-        forecast: lastHistory.observed,
-      };
-      return [...historySeries.slice(0, -1), bridgePoint, ...forecastSeries];
-    } else if (hasHistory) {
-      return [...historySeries];
-    } else if (hasForecast) {
-      return [...forecastSeries];
-    }
-    return [];
-  }, [hasHistory, hasForecast, historySeries, forecastSeries]);
+  // Transform historical, forecast, and bridged trajectory points via shared helper
+  const { historySeries, forecastSeries, combinedTrajectory } = useMemo(
+    () => buildTrajectorySeries(rawHistory, rawForecast, selectedPollutant),
+    [rawHistory, rawForecast, selectedPollutant]
+  );
 
   const displayedTrajectory = useMemo(() => {
-    if (timeRange === '24h') return combinedTrajectory.slice(-24);
+    if (timeRange === '24h') {
+      if (historySeries.length > 0 && forecastSeries.length > 0) {
+        const recentHistory = historySeries.slice(-12);
+        const upcomingForecast = forecastSeries.slice(0, 12);
+        const lastHist = recentHistory[recentHistory.length - 1];
+        const bridge = { ...lastHist, forecast: lastHist.observed };
+        return [...recentHistory.slice(0, -1), bridge, ...upcomingForecast];
+      }
+      return combinedTrajectory.slice(-24);
+    }
     if (timeRange === '48h') return combinedTrajectory.slice(-48);
     return combinedTrajectory;
-  }, [combinedTrajectory, timeRange]);
+  }, [historySeries, forecastSeries, combinedTrajectory, timeRange]);
 
-  const hasValidChartAData = useMemo(() => {
-    return displayedTrajectory.some(
-      (d) => (typeof d.observed === 'number' && d.observed !== null) ||
-             (typeof d.forecast === 'number' && d.forecast !== null)
-    );
-  }, [displayedTrajectory]);
+  const hasValidChartAData = useMemo(
+    () => hasValidTrajectoryData(displayedTrajectory),
+    [displayedTrajectory]
+  );
 
   // Multi-pollutant distribution data (Chart B): prioritize recent 18 hours of observations
-  const chartBData = useMemo(() => {
-    if (hasHistory) {
-      return historySeries.slice(-18);
-    } else if (hasForecast) {
-      return forecastSeries.slice(0, 18);
-    }
-    return [];
-  }, [hasHistory, hasForecast, historySeries, forecastSeries]);
+  const chartBData = useMemo(
+    () => selectChartBDistribution(historySeries, forecastSeries),
+    [historySeries, forecastSeries]
+  );
 
   const hasValidChartBData = useMemo(() => {
     return chartBData.some(
@@ -133,7 +90,9 @@ export const AnalyticsView: React.FC = () => {
   }, [chartBData]);
 
   const chartBPeriodLabel = hasHistory
-    ? 'Recent 18 Hours (Verified Observations)'
+    ? isSynthesizedHistory
+      ? 'Recent 18 Hours (Diurnal Projection — CAMS Offline)'
+      : 'Recent 18 Hours (CAMS History & Observations)'
     : hasForecast
     ? 'Next 18 Hours (Atmospheric Forecast)'
     : 'Recent 18 Hours';
@@ -141,43 +100,34 @@ export const AnalyticsView: React.FC = () => {
   // Current metric readings
   const meta = pollutantMeta[selectedPollutant];
   const rawMeasurement = airQuality?.measurements?.[selectedPollutant];
-  const currentVal = rawMeasurement?.value != null ? rawMeasurement.value.toFixed(1) : '—';
-  const currentUnit = rawMeasurement?.unit || meta.unit;
-  const currentSource = rawMeasurement?.source || airQuality?.primary_source || 'Verified Station Observation';
+  const currentVal = formatFiniteDecimal(rawMeasurement?.value, 1, '—');
+  const rawUnit = rawMeasurement?.unit;
+  const seriesUnit = meta.unit;
+  const currentUnit =
+    rawUnit && !['aqi_subindex', 'waqi_iaqi_subindex', 'ppm', 'ppb', 'unavailable'].includes(rawUnit)
+      ? rawUnit
+      : meta.unit;
+  const currentSource = rawMeasurement?.source || airQuality?.primary_source || 'Station Telemetry';
 
-  // Spike detection calculation
-  const spikeDetected = useMemo(() => {
-    if (!hasHistory || historySeries.length < 12) return false;
-    const recentVals = historySeries
-      .slice(-6)
-      .map((h) => h[selectedPollutant])
-      .filter((v): v is number => typeof v === 'number');
-    const priorVals = historySeries
-      .slice(-12, -6)
-      .map((h) => h[selectedPollutant])
-      .filter((v): v is number => typeof v === 'number');
-
-    if (recentVals.length === 0 || priorVals.length === 0) return false;
-    const recentAvg = recentVals.reduce((a, b) => a + b, 0) / recentVals.length;
-    const priorAvg = priorVals.reduce((a, b) => a + b, 0) / priorVals.length;
-    return priorAvg > 0 && recentAvg > priorAvg * 1.35;
-  }, [hasHistory, historySeries, selectedPollutant]);
+  // Spike detection unified with backend AlertService.detect_spike (>= 1.6x ratio and >= 15.0 delta over 6h mean)
+  const spikeResult = useMemo(
+    () => detectConcentrationSpike(rawHistory, rawMeasurement?.value, selectedPollutant),
+    [rawHistory, rawMeasurement?.value, selectedPollutant]
+  );
 
   // Export CSV handler
   const handleExportCSV = () => {
     if (!hasValidChartAData) return;
-    const headers = 'Timestamp,Pollutant,Observed_Conc,Forecast_Conc,Unit,Type\n';
-    const rows = displayedTrajectory
-      .map((s) => {
-        const val = s.isForecast ? s.forecast : s.observed;
-        return `"${s.isoTime || s.time}","${meta.label}",${s.observed ?? ''},${s.forecast ?? ''},"${currentUnit}","${s.isForecast ? 'Forecast' : 'Observed'}"`;
-      })
-      .join('\n');
-    const blob = new Blob([headers + rows], { type: 'text/csv;charset=utf-8;' });
+    const csvContent = buildTrajectoryCsv(displayedTrajectory, meta.label, seriesUnit);
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
+    const safeCity = sanitizeDownloadFilename(activeCity.name, '', 'location');
     a.href = url;
-    a.download = `AeroSense_${activeCity.name}_${selectedPollutant}_Trajectory_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = sanitizeDownloadFilename(
+      `AeroSense_${safeCity}_${selectedPollutant}_Trajectory_${new Date().toISOString().slice(0, 10)}`,
+      '.csv'
+    );
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -221,6 +171,23 @@ export const AnalyticsView: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-7xl mx-auto pb-12 font-sans">
+      {error && (
+        <div
+          role="alert"
+          className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between text-xs text-red-700 dark:text-red-300"
+        >
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{error}</span>
+          </div>
+          <button
+            onClick={() => refreshData()}
+            className="px-2.5 py-1 bg-red-500/20 hover:bg-red-500/30 rounded font-medium transition-colors"
+          >
+            Retry
+          </button>
+        </div>
+      )}
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 border-b border-clima-border dark:border-darkClima-border pb-5">
         <div>
@@ -233,7 +200,10 @@ export const AnalyticsView: React.FC = () => {
                 Atmospheric Pollution Analytics & Spatio-Temporal Trends
               </h2>
               <p className="text-xs text-clima-muted dark:text-darkClima-muted mt-0.5">
-                Location: <span className="text-clima-text dark:text-darkClima-text font-semibold">{activeCity.name}</span> • 72h contiguous reanalysis (48h verified history + 24h CAMS atmospheric forecast).
+                Location: <span className="text-clima-text dark:text-darkClima-text font-semibold">{activeCity.name}</span> •{' '}
+                {isSynthesizedHistory
+                  ? '72h ground-anchored diurnal projection (CAMS reanalysis unavailable).'
+                  : '72h contiguous trajectory (48h atmospheric history + 24h CAMS forecast).'}
               </p>
             </div>
           </div>
@@ -308,7 +278,7 @@ export const AnalyticsView: React.FC = () => {
       )}
 
       {/* Spike Alert Banner if detected */}
-      {spikeDetected && (
+      {spikeResult && (
         <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/80 rounded-xl flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="p-2 bg-amber-100 dark:bg-amber-900/60 rounded-lg text-amber-700 dark:text-amber-300">
@@ -316,10 +286,10 @@ export const AnalyticsView: React.FC = () => {
             </div>
             <div>
               <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200 font-sans">
-                Particulate Concentration Surge Detected ({meta.label})
+                Concentration Surge Detected ({meta.label})
               </h4>
               <p className="text-[11px] text-amber-800 dark:text-amber-300/80 font-sans">
-                Recent 6-hour average is significantly elevated above preceding baseline telemetry.
+                Current reading ({spikeResult.currentVal} {currentUnit}) is {spikeResult.spikeRatio}x above the recent 6-hour baseline ({spikeResult.recentAverage} {currentUnit}).
               </p>
             </div>
           </div>
@@ -352,7 +322,7 @@ export const AnalyticsView: React.FC = () => {
           <div className="flex flex-wrap items-center gap-3 text-xs font-sans text-clima-muted dark:text-darkClima-muted">
             <span className="flex items-center">
               <span className="w-2.5 h-2.5 rounded-full bg-[#087F72] mr-1.5" />
-              <span>Observed History</span>
+              <span>{isSynthesizedHistory ? 'Diurnal Projection (Synth.)' : 'Historical Trajectory'}</span>
               {!hasHistory && <span className="ml-1 text-[10px] text-amber-500">(Offline)</span>}
             </span>
             <span className="flex items-center">
@@ -387,7 +357,7 @@ export const AnalyticsView: React.FC = () => {
                 <YAxis
                   stroke={isDark ? '#A1B4AD' : '#647570'}
                   tick={{ fontSize: 10, fill: isDark ? '#A1B4AD' : '#647570', fontFamily: 'monospace' }}
-                  unit={` ${currentUnit}`}
+                  unit={` ${seriesUnit}`}
                 />
                 <Tooltip
                   contentStyle={{
@@ -399,16 +369,16 @@ export const AnalyticsView: React.FC = () => {
                     color: isDark ? '#E8F1EE' : '#172B28',
                     boxShadow: '0 4px 15px rgba(0,0,0,0.1)',
                   }}
-                  formatter={(val: any, name: any) => {
-                    if (val == null) return ['N/A', name];
-                    return [`${val} ${currentUnit}`, name];
+                  formatter={(val: number | string | Array<number | string> | undefined, name: string | number): [string, string | number] => {
+                    if (typeof val !== 'number' || !Number.isFinite(val)) return ['N/A', name];
+                    return [`${val} ${seriesUnit}`, name];
                   }}
                   labelFormatter={(label) => `Time: ${label}`}
                 />
                 <Area
                   type="monotone"
                   dataKey="observed"
-                  name="Observed History"
+                  name={isSynthesizedHistory ? 'Diurnal Projection (Synth.)' : 'Historical Trajectory'}
                   stroke="#087F72"
                   strokeWidth={2.5}
                   fillOpacity={1}
@@ -494,8 +464,8 @@ export const AnalyticsView: React.FC = () => {
                     fontSize: '11px',
                     color: isDark ? '#E8F1EE' : '#172B28',
                   }}
-                  formatter={(val: any, name: any) => [
-                    typeof val === 'number' && !isNaN(val) ? `${val} µg/m³` : 'Not Monitored',
+                  formatter={(val: number | string | Array<number | string> | undefined, name: string | number): [string, string | number] => [
+                    typeof val === 'number' && Number.isFinite(val) ? `${val} µg/m³` : 'Not Monitored',
                     name
                   ]}
                   labelFormatter={(label) => `Time: ${label}`}

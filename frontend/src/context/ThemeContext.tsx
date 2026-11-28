@@ -2,6 +2,11 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
 
+export function resolveThemeMode(mode: ThemeMode, systemIsDark: boolean): 'light' | 'dark' {
+  if (mode === 'system') return systemIsDark ? 'dark' : 'light';
+  return mode;
+}
+
 interface ThemeContextType {
   theme: ThemeMode;
   resolvedTheme: 'light' | 'dark';
@@ -34,7 +39,7 @@ export const ThemeProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return () => media.removeEventListener('change', listener);
   }, []);
 
-  const resolvedTheme: 'light' | 'dark' = theme === 'system' ? (systemIsDark ? 'dark' : 'light') : theme;
+  const resolvedTheme: 'light' | 'dark' = resolveThemeMode(theme, systemIsDark);
 
   useEffect(() => {
     const root = document.documentElement;

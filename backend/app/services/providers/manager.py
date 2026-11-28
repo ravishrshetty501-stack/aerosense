@@ -5,7 +5,32 @@ from app.services.providers.base import NormalizedMeasurement, LocationInfo, Air
 from app.services.providers.open_meteo import open_meteo_provider
 from app.services.providers.openaq import openaq_provider
 from app.services.providers.waqi import waqi_provider
-from app.services.aqi.engine import aqi_engine
+from app.services.aqi.engine import aqi_engine, normalize_standard_name
+
+_EXPECTED_CONCENTRATION_UNITS: Dict[str, str] = {
+    "pm25": "ug/m3",
+    "pm10": "ug/m3",
+    "no2": "ug/m3",
+    "so2": "ug/m3",
+    "o3": "ug/m3",
+    "co": "mg/m3",
+}
+
+
+def _is_usable_concentration(pollutant: str, meas: NormalizedMeasurement) -> bool:
+    """Returns True only when meas holds a finite concentration in the unit expected by AQI tables."""
+    if meas.value is None or isinstance(meas.value, bool) or not isinstance(meas.value, (int, float)):
+        return False
+    try:
+        numeric = float(meas.value)
+    except (OverflowError, ValueError, TypeError):
+        return False
+    if not math.isfinite(numeric) or numeric < 0:
+        return False
+    origin_ok = meas.data_origin in ("measured", "model_derived") or (
+        meas.data_origin is None and meas.measurement_type in ("ground_observation", "model_estimate")
+    )
+    return origin_ok and meas.unit == _EXPECTED_CONCENTRATION_UNITS.get(pollutant)
 
 class EnvironmentalDataManager:
     """
@@ -39,36 +64,111 @@ class EnvironmentalDataManager:
         is_ground = False
         primary_source = "Open-Meteo CAMS Ensemble (Model Current Estimate)"
         merged_measurements: Dict[str, NormalizedMeasurement] = {}
+        provider_indices: Dict[str, Any] = {}
 
-        # If Open-Meteo succeeded, populate model baseline
-        if meteo_data and "measurements" in meteo_data:
-            merged_measurements.update(meteo_data["measurements"])
+        # If Open-Meteo succeeded, populate model baseline concentrations & provider indices
+        if meteo_data:
+            if "measurements" in meteo_data:
+                merged_measurements.update(meteo_data["measurements"])
+            if meteo_data.get("provider_us_aqi") is not None or meteo_data.get("provider_european_aqi") is not None:
+                provider_indices["open_meteo"] = {
+                    "source": "Open-Meteo CAMS Ensemble",
+                    "us_aqi": meteo_data.get("provider_us_aqi"),
+                    "european_aqi": meteo_data.get("provider_european_aqi"),
+                }
 
-        # If physical ground station is available, prioritize ground sensors!
-        if ground_data and "measurements" in ground_data and ground_data["measurements"]:
-            is_ground = True
+        # Preserve WAQI provider-reported AQI indices separately and apply valid ground concentrations
+        # without ever overwriting valid concentration measurements with None/sub-indices.
+        if ground_data:
+            if ground_data.get("provider_aqi") is not None or ground_data.get("provider_subindices"):
+                obs_dt = ground_data.get("observation_time")
+                provider_indices["waqi"] = {
+                    "source": ground_data.get("source"),
+                    "station_name": ground_data.get("station_name"),
+                    "overall_aqi": ground_data.get("provider_aqi"),
+                    "dominant_pollutant": ground_data.get("dominant_pollutant"),
+                    "subindices": ground_data.get("provider_subindices", {}),
+                    "observation_time": obs_dt.isoformat() if isinstance(obs_dt, datetime) else None,
+                }
+
+            for p_key, ground_meas in (ground_data.get("measurements") or {}).items():
+                if _is_usable_concentration(p_key, ground_meas):
+                    merged_measurements[p_key] = ground_meas
+                elif ground_meas.data_origin == "provider_index":
+                    existing = merged_measurements.get(p_key)
+                    if existing is not None and _is_usable_concentration(p_key, existing):
+                        merged_measurements[p_key] = existing.model_copy(
+                            update={"provider_aqi_subindex": ground_meas.provider_aqi_subindex}
+                        )
+                    elif p_key not in merged_measurements:
+                        merged_measurements[p_key] = ground_meas
+                elif p_key not in merged_measurements:
+                    merged_measurements[p_key] = ground_meas
+
+        has_ground_concentration = any(
+            _is_usable_concentration(k, v)
+            and (
+                v.data_origin == "measured"
+                or (v.data_origin is None and v.measurement_type == "ground_observation")
+            )
+            for k, v in merged_measurements.items()
+        )
+        is_ground = has_ground_concentration
+
+        if has_ground_concentration and ground_data:
             primary_source = f"{ground_data['source']} (Physical Ground Sensor)"
-            for p_key, ground_meas in ground_data["measurements"].items():
-                merged_measurements[p_key] = ground_meas  # Ground observation overrides model estimate
+        elif "waqi" in provider_indices and meteo_data:
+            primary_source = f"Open-Meteo CAMS Ensemble (Model Concentrations) + {ground_data['source']} (Provider Index)"
+        elif "waqi" in provider_indices and ground_data:
+            primary_source = f"{ground_data['source']} (Provider-Reported AQI Index)"
+        elif ground_data and not meteo_data:
+            primary_source = f"{ground_data['source']} (Unconverted / Unavailable Concentration)"
+        elif not meteo_data:
+            primary_source = "Unavailable"
 
-        # Calculate raw numeric dictionary for deterministic AQI calculations
+        # Extract D.3.4.2a model-derived trailing 8h O3 aggregate (or unavailable status) before AQI calculation
+        rolling_o3_8h = None
+        if meteo_data and isinstance(meteo_data.get("rolling_o3_8h"), dict):
+            rolling_o3_8h = meteo_data["rolling_o3_8h"]
+        else:
+            from app.services.providers.open_meteo import compute_rolling_8h_ozone
+
+            raw_series = meteo_data.get("hourly_series") if meteo_data else None
+            target_ts = (
+                meteo_data.get("observation_time")
+                if meteo_data and meteo_data.get("observation_time") is not None
+                else datetime.now(timezone.utc)
+            )
+            rolling_o3_8h = compute_rolling_8h_ozone(raw_series, target_ts)
+
+        # Calculate raw numeric dictionary strictly from usable concentrations
         raw_values = {
-            k: v.value for k, v in merged_measurements.items() if v.value is not None
+            k: v.value
+            for k, v in merged_measurements.items()
+            if _is_usable_concentration(k, v)
         }
 
-        # Deterministic calculation across all 3 standards
-        aqi_results = aqi_engine.calculate_all_standards(raw_values)
-        selected_aqi = aqi_results.get(preferred_standard, aqi_results["US_EPA"])
+        # Deterministic calculation across all 3 standards; pass rich measurement metadata to US EPA
+        aqi_results = aqi_engine.calculate_all_standards(
+            raw_values,
+            measurement_metadata=merged_measurements,
+            model_derived_aggregates={"o3_8h": rolling_o3_8h} if rolling_o3_8h is not None else None,
+        )
+        selected_key = normalize_standard_name(preferred_standard)
+        selected_aqi = aqi_results.get(selected_key, aqi_results["US_EPA"])
         dominant_pollutant = selected_aqi.get("dominant_pollutant")
 
-        # Data freshness calculation
+        # Data freshness calculation (explicit UTC normalization across all provider timezones)
         freshness_minutes = 15
         if merged_measurements:
             sample_time = next(iter(merged_measurements.values())).observation_timestamp
             now_utc = datetime.now(timezone.utc)
-            if sample_time.tzinfo is None:
-                sample_time = sample_time.replace(tzinfo=timezone.utc)
-            delta = now_utc - sample_time
+            sample_utc = (
+                sample_time.astimezone(timezone.utc)
+                if sample_time.tzinfo is not None
+                else sample_time.replace(tzinfo=timezone.utc)
+            )
+            delta = now_utc - sample_utc
             freshness_minutes = max(1, int(delta.total_seconds() / 60))
 
         hourly_history = []
@@ -82,8 +182,9 @@ class EnvironmentalDataManager:
 
         # Resilient atmospheric series fallback: if CAMS satellite reanalysis is unavailable
         # or rate-limited by upstream providers, construct a physically grounded diurnal atmospheric
-        # trajectory anchored directly to the verified physical ground station observations.
-        if not hourly_history and not forecast and merged_measurements:
+        # trajectory anchored directly to valid concentration observations.
+        # Note: Synthesized chart trajectories are NEVER fed into compute_rolling_8h_ozone.
+        if not hourly_history and not forecast and raw_values:
             hourly_history, forecast = self._synthesize_diurnal_series(merged_measurements)
 
         return AirQualityResponse(
@@ -99,9 +200,11 @@ class EnvironmentalDataManager:
             dominant_pollutant=dominant_pollutant,
             weather_context={
                 "elevation": meteo_data.get("elevation", 0) if meteo_data else 0,
-                "provider_us_aqi": meteo_data.get("provider_us_aqi") if meteo_data else aqi_results["US_EPA"]["aqi"],
-                "provider_european_aqi": meteo_data.get("provider_european_aqi") if meteo_data else aqi_results["EUROPEAN_AQI"]["aqi"],
+                "provider_us_aqi": meteo_data.get("provider_us_aqi") if meteo_data else None,
+                "provider_european_aqi": meteo_data.get("provider_european_aqi") if meteo_data else None,
             },
+            provider_indices=provider_indices or None,
+            model_derived_aggregates={"o3_8h": rolling_o3_8h} if rolling_o3_8h is not None else None,
             hourly_history=hourly_history[-48:] if hourly_history else [], # past 48h
             forecast=forecast[:72] if forecast else [], # next 72h
             primary_source=primary_source,
@@ -122,13 +225,13 @@ class EnvironmentalDataManager:
         now = ref_time or datetime.now(timezone.utc)
         now = now.replace(minute=0, second=0, microsecond=0)
 
-        current_vals = {}
+        current_vals: Dict[str, float] = {}
         for p in ["pm25", "pm10", "no2", "o3"]:
             if p in measurements and measurements[p].value is not None:
                 current_vals[p] = float(measurements[p].value)
-            else:
-                defaults = {"pm25": 35.0, "pm10": 60.0, "no2": 20.0, "o3": 25.0}
-                current_vals[p] = defaults[p]
+
+        if not current_vals:
+            return [], []
 
         def diurnal_factor(pollutant: str, hour: int) -> float:
             if pollutant == "o3":
@@ -145,41 +248,43 @@ class EnvironmentalDataManager:
                 return max(0.3, 1.0 + 0.35 * math.cos(rad1))
             return 1.0
 
-        history = []
-        for h in range(48, 0, -1):
-            t = now - timedelta(hours=h)
-            hr = t.hour
-            pt = {
-                "time": t.strftime("%Y-%m-%dT%H:00"),
-                "is_forecast": False,
-                "type": "ground_anchored_reanalysis"
+        def build_hourly_point(target_time: datetime, is_forecast: bool, point_type: str) -> Dict[str, Any]:
+            hr = target_time.hour
+            pt: Dict[str, Any] = {
+                "time": target_time.strftime("%Y-%m-%dT%H:00"),
+                "is_forecast": is_forecast,
+                "type": point_type,
+                "is_synthesized": True,
             }
-            for p, cur in current_vals.items():
-                f_now = diurnal_factor(p, now.hour)
-                f_t = diurnal_factor(p, hr)
-                pt[p] = round(cur * (f_t / max(0.1, f_now)), 1)
-            raw_for_aqi = {k: pt[k] for k in ["pm25", "pm10", "no2", "o3"]}
-            calc = aqi_engine.calculate(raw_for_aqi, "US_EPA")
+            for p in ["pm25", "pm10", "no2", "o3"]:
+                if p in current_vals:
+                    f_now = diurnal_factor(p, now.hour)
+                    f_t = diurnal_factor(p, hr)
+                    pt[p] = round(current_vals[p] * (f_t / max(0.1, f_now)), 1)
+                else:
+                    pt[p] = None
+            synth_meta = {
+                k: {
+                    "value": pt[k],
+                    "unit": "ug/m3",
+                    "data_origin": "model_derived",
+                    "averaging_period": "instantaneous",
+                }
+                for k in ["pm25", "pm10"]
+                if pt[k] is not None
+            }
+            calc = aqi_engine.calculate({}, "US_EPA", measurement_metadata=synth_meta)
             pt["us_aqi"] = calc.get("aqi")
-            history.append(pt)
+            return pt
 
-        forecast = []
-        for h in range(1, 73):
-            t = now + timedelta(hours=h)
-            hr = t.hour
-            pt = {
-                "time": t.strftime("%Y-%m-%dT%H:00"),
-                "is_forecast": True,
-                "type": "forecast"
-            }
-            for p, cur in current_vals.items():
-                f_now = diurnal_factor(p, now.hour)
-                f_t = diurnal_factor(p, hr)
-                pt[p] = round(cur * (f_t / max(0.1, f_now)), 1)
-            raw_for_aqi = {k: pt[k] for k in ["pm25", "pm10", "no2", "o3"]}
-            calc = aqi_engine.calculate(raw_for_aqi, "US_EPA")
-            pt["us_aqi"] = calc.get("aqi")
-            forecast.append(pt)
+        history = [
+            build_hourly_point(now - timedelta(hours=h), False, "ground_anchored_reanalysis")
+            for h in range(48, 0, -1)
+        ]
+        forecast = [
+            build_hourly_point(now + timedelta(hours=h), True, "forecast")
+            for h in range(1, 73)
+        ]
 
         return history, forecast
 

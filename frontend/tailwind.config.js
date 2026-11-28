@@ -81,6 +81,9 @@ export default {
         'subtle': '0 1px 3px 0 rgba(23, 37, 34, 0.04), 0 1px 2px -1px rgba(23, 37, 34, 0.04)',
         'floating': '0 4px 16px -2px rgba(23, 37, 34, 0.06), 0 2px 4px -1px rgba(23, 37, 34, 0.03)',
         'floating-dark': '0 4px 20px -2px rgba(0, 0, 0, 0.4), 0 2px 6px -1px rgba(0, 0, 0, 0.25)',
+      },
+      gridTemplateColumns: {
+        '24': 'repeat(24, minmax(0, 1fr))',
       }
     },
   },

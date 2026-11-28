@@ -1,4 +1,5 @@
-from typing import Dict, Optional, Tuple
+import math
+from typing import Any, Dict, Optional, Tuple
 
 """
 European Air Quality Index (EAQI)
@@ -29,36 +30,87 @@ CATEGORY_MAP = {
     6: ("Extremely Poor", "#7f1d1d", "Air quality is extremely poor. Reduce outdoor physical activity for everyone.")
 }
 
-def get_eaqi_band(pollutant: str, conc: float) -> Optional[int]:
-    pollutant = pollutant.lower().replace(".", "").replace("-", "")
-    thresholds = EAQI_THRESHOLDS.get(pollutant)
-    if not thresholds or conc < 0:
+
+def _extract_finite_nonneg(raw: Any) -> Optional[float]:
+    """Extracts a finite non-negative float (rejecting None, bool, strings, NaN, +/-inf, negative)."""
+    if raw is None or isinstance(raw, bool) or not isinstance(raw, (int, float)):
         return None
-        
-    if conc <= thresholds[1]:
+    try:
+        numeric = float(raw)
+    except (OverflowError, ValueError, TypeError):
+        return None
+    if not math.isfinite(numeric) or numeric < 0.0:
+        return None
+    return 0.0 if numeric == 0.0 else numeric
+
+
+def get_eaqi_band(pollutant: str, conc: Any) -> Optional[int]:
+    if not isinstance(pollutant, str):
+        return None
+    norm_pollutant = pollutant.lower().replace(".", "").replace("-", "")
+    thresholds = EAQI_THRESHOLDS.get(norm_pollutant)
+    numeric = _extract_finite_nonneg(conc)
+    if not thresholds or numeric is None:
+        return None
+
+    if numeric <= thresholds[1]:
         return 1
-    elif conc <= thresholds[2]:
+    elif numeric <= thresholds[2]:
         return 2
-    elif conc <= thresholds[3]:
+    elif numeric <= thresholds[3]:
         return 3
-    elif conc <= thresholds[4]:
+    elif numeric <= thresholds[4]:
         return 4
-    elif conc <= thresholds[5]:
+    elif numeric <= thresholds[5]:
         return 5
     else:
         return 6
 
-def calculate_european_aqi(measurements: Dict[str, float]) -> Dict:
+
+def _extract_eaqi_concentration(raw_item: Any) -> Optional[float]:
+    """Extracts usable ug/m3 / mg/m3 concentration for EAQI while excluding provider_index and volumetric gaps."""
+    if hasattr(raw_item, "model_dump") or hasattr(raw_item, "unit"):
+        data_origin = getattr(raw_item, "data_origin", None)
+        unit = str(getattr(raw_item, "unit", "") or "").strip().lower()
+        val = getattr(raw_item, "value", None)
+    elif isinstance(raw_item, dict):
+        data_origin = raw_item.get("data_origin")
+        unit = str(raw_item.get("unit", "") or "").strip().lower()
+        val = raw_item.get("value")
+    else:
+        return _extract_finite_nonneg(raw_item)
+
+    if data_origin == "provider_index" or unit in {"aqi_subindex", "waqi_iaqi_subindex", "ppm", "ppb", "unavailable"}:
+        return None
+    numeric = _extract_finite_nonneg(val)
+    if numeric is None:
+        return None
+    if unit in {"mg/m3", "mg/m³", "mg/m^3"}:
+        return numeric * 1000.0
+    if unit in {"", "ug/m3", "µg/m³", "μg/m³", "ug/m^3"}:
+        return numeric
+    return None
+
+
+def calculate_european_aqi(
+    measurements: Dict[str, Any],
+    *,
+    measurement_metadata: Optional[Dict[str, Any]] = None,
+) -> Dict:
     """
     Calculates EAQI band (1 to 6) and maps to scaled score (0 to 100).
     Dominant pollutant is the one with highest band level.
     """
+    source_items = measurement_metadata if isinstance(measurement_metadata, dict) else measurements
     subindices = {}
-    for p, val in measurements.items():
-        if val is not None and val >= 0:
-            band = get_eaqi_band(p, val)
-            if band is not None:
-                subindices[p.lower()] = band
+    if isinstance(source_items, dict):
+        for p, raw_val in source_items.items():
+            conc = _extract_eaqi_concentration(raw_val)
+            if conc is not None:
+                band = get_eaqi_band(str(p), conc)
+                if band is not None:
+                    norm_key = str(p).lower().replace(".", "").replace("-", "")
+                    subindices[norm_key] = max(subindices.get(norm_key, -1), band)
                 
     if not subindices:
         return {

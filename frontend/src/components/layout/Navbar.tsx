@@ -24,6 +24,31 @@ interface SearchLocationItem {
   longitude: number;
 }
 
+export function navigateComboboxIndex(
+  currentIndex: number,
+  key: 'ArrowDown' | 'ArrowUp' | 'Escape' | 'Enter',
+  count: number
+): { nextIndex: number; selected: boolean; closed: boolean } {
+  if (count === 0) return { nextIndex: -1, selected: false, closed: false };
+
+  if (key === 'ArrowDown') {
+    const next = currentIndex < count - 1 ? currentIndex + 1 : 0;
+    return { nextIndex: next, selected: false, closed: false };
+  }
+  if (key === 'ArrowUp') {
+    const next = currentIndex > 0 ? currentIndex - 1 : count - 1;
+    return { nextIndex: next, selected: false, closed: false };
+  }
+  if (key === 'Escape') {
+    return { nextIndex: -1, selected: false, closed: true };
+  }
+  if (key === 'Enter') {
+    const valid = currentIndex >= 0 && currentIndex < count;
+    return { nextIndex: -1, selected: valid, closed: true };
+  }
+  return { nextIndex: currentIndex, selected: false, closed: false };
+}
+
 export const Navbar: React.FC = () => {
   const { activeCity, setActiveCity, standard, setStandard, loading, refreshData } = useAQI();
   const { user, openAuthModal, logout } = useAuth();
@@ -59,19 +84,26 @@ export const Navbar: React.FC = () => {
       setSearchResults([]);
       return;
     }
+    let active = true;
     const timer = setTimeout(async () => {
       setIsSearching(true);
       try {
         const results = await api.searchLocations(searchQuery);
-        setSearchResults(results);
+        if (!active) return;
+        setSearchResults(Array.isArray(results) ? results : []);
         setShowDropdown(true);
       } catch (err) {
+        if (!active) return;
         console.error(err);
+        setSearchResults([]);
       } finally {
-        setIsSearching(false);
+        if (active) setIsSearching(false);
       }
     }, 280);
-    return () => clearTimeout(timer);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
   }, [searchQuery]);
 
   const selectCity = (item: SearchLocationItem) => {
@@ -97,21 +129,17 @@ export const Navbar: React.FC = () => {
       return;
     }
 
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev < searchResults.length - 1 ? prev + 1 : 0));
-    } else if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      setSelectedIndex((prev) => (prev > 0 ? prev - 1 : searchResults.length - 1));
-    } else if (e.key === 'Enter') {
-      if (selectedIndex >= 0 && selectedIndex < searchResults.length) {
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp' || e.key === 'Enter' || e.key === 'Escape') {
+      const action = navigateComboboxIndex(selectedIndex, e.key, searchResults.length);
+      if (e.key !== 'Enter' || action.selected) {
         e.preventDefault();
-        selectCity(searchResults[selectedIndex]);
       }
-    } else if (e.key === 'Escape') {
-      e.preventDefault();
-      setShowDropdown(false);
-      setSelectedIndex(-1);
+      if (action.selected) {
+        selectCity(searchResults[selectedIndex]);
+      } else {
+        setSelectedIndex(action.nextIndex);
+        if (action.closed) setShowDropdown(false);
+      }
     }
   };
 

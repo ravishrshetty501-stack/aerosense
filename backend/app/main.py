@@ -6,9 +6,82 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import JSONResponse, FileResponse, PlainTextResponse
 from app.core.config import settings
+from app.core.redaction import install_log_redaction
 from app.core.database import engine, Base
 
+install_log_redaction()
+
 APP_START_TIME = time.time()
+_HTTP_REQUEST_COUNT = 0
+
+
+class _PayloadTooLargeError(Exception):
+    """Raised immediately while streaming an HTTP body that exceeds MAX_REQUEST_SIZE_BYTES."""
+
+
+class RequestSizeLimitMiddleware:
+    """Enforces MAX_REQUEST_SIZE_BYTES on Content-Length and streamed/chunked bodies without full buffering."""
+
+    def __init__(self, app_asgi):
+        self.app = app_asgi
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        max_bytes = int(getattr(settings, "MAX_REQUEST_SIZE_BYTES", 5 * 1024 * 1024))
+        for header_name, header_val in scope.get("headers") or ():
+            if header_name.lower() == b"content-length":
+                try:
+                    content_length = int(header_val.decode("ascii").strip())
+                except (UnicodeDecodeError, ValueError):
+                    resp = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header."})
+                    await resp(scope, receive, send)
+                    return
+                if content_length < 0:
+                    resp = JSONResponse(status_code=400, content={"detail": "Invalid Content-Length header."})
+                    await resp(scope, receive, send)
+                    return
+                if content_length > max_bytes:
+                    resp = JSONResponse(
+                        status_code=413,
+                        content={"detail": "Request body exceeds maximum allowed size."},
+                    )
+                    await resp(scope, receive, send)
+                    return
+                break
+
+        bytes_received = 0
+        response_started = False
+
+        async def limited_receive():
+            nonlocal bytes_received
+            message = await receive()
+            if message.get("type") == "http.request":
+                chunk = message.get("body", b"")
+                bytes_received += len(chunk)
+                if bytes_received > max_bytes:
+                    raise _PayloadTooLargeError()
+            return message
+
+        async def send_wrapper(message):
+            nonlocal response_started
+            if message.get("type") == "http.response.start":
+                response_started = True
+            await send(message)
+
+        try:
+            await self.app(scope, limited_receive, send_wrapper)
+        except _PayloadTooLargeError:
+            if not response_started:
+                resp = JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body exceeds maximum allowed size."},
+                )
+                await resp(scope, receive, send)
+                return
+            raise
 
 # Import all models so SQLAlchemy discovers them before creating tables
 import app.models
@@ -43,6 +116,9 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Request size guard (inner to CORS so 413 responses also carry CORS headers cleanly)
+app.add_middleware(RequestSizeLimitMiddleware)
+
 # CORS Middleware
 app.add_middleware(
     CORSMiddleware,
@@ -52,9 +128,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
+@app.exception_handler(_PayloadTooLargeError)
+async def payload_too_large_handler(request: Request, exc: _PayloadTooLargeError):
+    return JSONResponse(
+        status_code=413,
+        content={"detail": "Request body exceeds maximum allowed size."},
+    )
+
+
 # Performance & Security headers middleware
 @app.middleware("http")
 async def add_process_time_and_security_headers(request: Request, call_next):
+    global _HTTP_REQUEST_COUNT
+    _HTTP_REQUEST_COUNT += 1
     start_time = time.time()
     response = await call_next(request)
     process_time = time.time() - start_time
@@ -125,16 +212,17 @@ async def root_health():
 @app.get("/metrics", tags=["System"])
 async def prometheus_metrics():
     uptime = time.time() - APP_START_TIME
+    configured_providers = 1 + int(bool(settings.WAQI_API_KEY)) + int(bool(settings.OPENAQ_API_KEY))
     lines = [
         "# HELP http_requests_total Total number of HTTP requests processed by AeroSense AI",
         "# TYPE http_requests_total counter",
-        "http_requests_total 128",
+        f"http_requests_total {_HTTP_REQUEST_COUNT}",
         "# HELP aerosense_system_uptime_seconds AeroSense system uptime in seconds",
         "# TYPE aerosense_system_uptime_seconds gauge",
         f"aerosense_system_uptime_seconds {uptime:.2f}",
         "# HELP aerosense_active_providers_count Active environmental telemetry providers",
         "# TYPE aerosense_active_providers_count gauge",
-        "aerosense_active_providers_count 3"
+        f"aerosense_active_providers_count {configured_providers}"
     ]
     return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 

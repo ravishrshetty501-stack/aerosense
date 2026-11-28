@@ -52,9 +52,10 @@ def test_aqi_engine_extreme_and_outlier_inputs():
     assert res_zero["aqi"] == 0
     assert res_zero["category"] == "Good"
 
-    # Extreme apocalyptic particulate level (1500 ug/m3 PM2.5) -> must cap at Hazardous (500 AQI)
+    # Extreme apocalyptic particulate level (1500 ug/m3 PM2.5) -> Equation 1 extrapolates beyond 500 (Hazardous)
     res_extreme = aqi_engine.calculate({"pm25": 1500.0}, standard="US_EPA")
-    assert res_extreme["aqi"] == 500
+    assert res_extreme["aqi"] == 2840
+    assert res_extreme["aqi"] > 500
     assert res_extreme["category"] == "Hazardous"
 
 @pytest.mark.asyncio

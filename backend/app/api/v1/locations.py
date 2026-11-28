@@ -32,9 +32,9 @@ async def get_popular_cities():
 
 @router.get("/stations")
 async def get_nearby_stations(
-    lat: float = Query(...),
-    lon: float = Query(...),
-    radius: int = Query(50000, description="Radius in meters")
+    lat: float = Query(..., ge=-90.0, le=90.0, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180.0, le=180.0, allow_inf_nan=False),
+    radius: int = Query(50000, ge=100, le=500000, description="Radius in meters")
 ):
     """
     Retrieves authentic ground-level monitoring stations within geographic bounds.
@@ -42,17 +42,22 @@ async def get_nearby_stations(
     Never fabricates or generates synthetic stations.
     """
     stations = []
+    provider_label = "None"
     
     # 1. Primary ground-station provider: WAQI
     try:
         stations = await waqi_provider.find_nearby_stations(lat, lon, radius_meters=radius, limit=40)
-    except Exception as e:
+        if stations:
+            provider_label = "WAQI Physical Sensor Network"
+    except Exception:
         stations = []
 
     # 2. Secondary fallback if configured: OpenAQ
     if not stations:
         try:
             stations = await openaq_provider.find_nearby_stations(lat, lon, radius_meters=radius, limit=20)
+            if stations:
+                provider_label = "OpenAQ Global Repository"
         except Exception:
             stations = []
 
@@ -60,6 +65,6 @@ async def get_nearby_stations(
     return {
         "stations": stations,
         "count": len(stations),
-        "provider": "WAQI Physical Sensor Network" if stations else "None",
+        "provider": provider_label,
         "has_ground_data": len(stations) > 0
     }

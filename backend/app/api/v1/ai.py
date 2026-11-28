@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, Body
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.ai_service import ai_service
 from app.api.deps import get_current_user_optional
@@ -11,7 +11,7 @@ router = APIRouter(prefix="/ai", tags=["GenAI Assistant"])
 @router.post("/chat", response_model=ChatResponse, dependencies=[Depends(ai_chat_limiter)])
 async def chat_with_assistant(
     request: ChatRequest,
-    current_user: User = Depends(get_current_user_optional)
+    current_user: Optional[User] = Depends(get_current_user_optional)
 ):
     result = await ai_service.chat(
         user_message=request.message,
@@ -25,9 +25,10 @@ async def chat_with_assistant(
         model=result.get("model", "dynamic-fallback")
     )
 
-@router.post("/tool")
+@router.post("/tool", dependencies=[Depends(ai_chat_limiter)])
 async def execute_tool_direct(
     tool_name: str = Body(..., embed=True),
-    arguments: Dict[str, Any] = Body(..., embed=True)
+    arguments: Dict[str, Any] = Body(..., embed=True),
+    current_user: Optional[User] = Depends(get_current_user_optional),
 ):
     return await ai_service.execute_tool(tool_name, arguments)

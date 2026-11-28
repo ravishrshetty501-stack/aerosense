@@ -1,9 +1,116 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { useAQI } from '../../context/AQIContext';
 import { api } from '../../services/api';
 import { AlertRule, AlertEvent } from '../../types/user';
-import { BellRing, Plus, Trash2, CheckCircle2, AlertTriangle, ShieldAlert, X } from 'lucide-react';
+import { BellRing, Plus, Trash2, AlertTriangle, RefreshCw, X } from 'lucide-react';
+
+export interface AlertRuleValidationResult {
+  valid: boolean;
+  error: string | null;
+  locationName?: string;
+  threshold?: number;
+}
+
+/**
+ * Validates alert creation fields without coercing empty or non-finite values to 0.
+ */
+export function validateAlertRuleInput(params: {
+  locationName: string;
+  thresholdInput: string;
+  latitude: number;
+  longitude: number;
+}): AlertRuleValidationResult {
+  const cleanLocation = String(params.locationName ?? '').trim();
+  if (!cleanLocation) {
+    return { valid: false, error: 'Monitored city or region is required.' };
+  }
+
+  const rawThreshold = String(params.thresholdInput ?? '').trim();
+  if (!rawThreshold) {
+    return { valid: false, error: 'Threshold level is required.' };
+  }
+
+  if (!/^[+-]?(?:\d+\.?\d*|\.\d+)$/.test(rawThreshold)) {
+    return { valid: false, error: 'Threshold level must be a valid finite number.' };
+  }
+
+  const parsed = Number(rawThreshold);
+  if (!Number.isFinite(parsed)) {
+    return { valid: false, error: 'Threshold level must be a valid finite number.' };
+  }
+
+  if (parsed < 0) {
+    return { valid: false, error: 'Threshold level cannot be negative.' };
+  }
+
+  if (
+    typeof params.latitude !== 'number' ||
+    !Number.isFinite(params.latitude) ||
+    typeof params.longitude !== 'number' ||
+    !Number.isFinite(params.longitude)
+  ) {
+    return { valid: false, error: 'Selected city coordinates are invalid.' };
+  }
+
+  return {
+    valid: true,
+    error: null,
+    locationName: cleanLocation,
+    threshold: Object.is(parsed, -0) ? 0 : parsed,
+  };
+}
+
+/**
+ * Loads alert rules and events safely, guaranteeing empty data when unauthenticated
+ * and normalized errors when backend requests fail.
+ */
+export async function executeLoadAlerts(
+  hasUser: boolean,
+  fetchRules: () => Promise<AlertRule[]> = () => api.getAlertRules(),
+  fetchEvents: () => Promise<AlertEvent[]> = () => api.getAlertEvents()
+): Promise<{ rules: AlertRule[]; events: AlertEvent[]; error: string | null }> {
+  if (!hasUser) {
+    return { rules: [], events: [], error: null };
+  }
+  try {
+    const [rList, eList] = await Promise.all([fetchRules(), fetchEvents()]);
+    return {
+      rules: Array.isArray(rList) ? rList : [],
+      events: Array.isArray(eList) ? eList : [],
+      error: null,
+    };
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error && err.message
+        ? err.message
+        : 'Failed to load alert rules and breach history.';
+    return { rules: [], events: [], error: msg };
+  }
+}
+
+/**
+ * Deletes an alert rule via API and preserves existing rules if deletion fails.
+ */
+export async function executeDeleteAlertRule(
+  ruleId: string,
+  currentRules: AlertRule[],
+  deleter: (id: string) => Promise<void> = (id) => api.deleteAlertRule(id)
+): Promise<{ rules: AlertRule[]; error: string | null }> {
+  try {
+    await deleter(ruleId);
+    return {
+      rules: currentRules.filter((r) => r.id !== ruleId),
+      error: null,
+    };
+  } catch (err: unknown) {
+    const msg =
+      err instanceof Error && err.message
+        ? err.message
+        : 'Failed to delete alert rule. Please try again.';
+    return { rules: currentRules, error: msg };
+  }
+}
 
 export const AlertsView: React.FC = () => {
   const { user, openAuthModal } = useAuth();
@@ -12,56 +119,138 @@ export const AlertsView: React.FC = () => {
   const [events, setEvents] = useState<AlertEvent[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [showAddModal, setShowAddModal] = useState<boolean>(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<boolean>(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const isMountedRef = useRef<boolean>(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   // Form state
   const [locationName, setLocationName] = useState(activeCity.name);
-  const [threshold, setThreshold] = useState<number>(100);
+  const [thresholdInput, setThresholdInput] = useState<string>('100');
   const [pollutant, setPollutant] = useState<string>('aqi');
   const [severity, setSeverity] = useState<string>('warning');
 
-  const loadAlerts = async () => {
-    if (!user) return;
-    setLoading(true);
-    try {
-      const [rList, eList] = await Promise.all([
-        api.getAlertRules(),
-        api.getAlertEvents(),
-      ]);
-      setRules(rList);
-      setEvents(eList);
-    } catch (e) {
-      console.error(e);
-    } finally {
+  const loadAlerts = useCallback(async (isCancelled: () => boolean = () => false) => {
+    if (!user) {
+      setRules([]);
+      setEvents([]);
+      setActionError(null);
       setLoading(false);
+      return;
     }
-  };
+    setLoading(true);
+    setActionError(null);
+    try {
+      const outcome = await executeLoadAlerts(true);
+      if (isCancelled()) return;
+      setRules(outcome.rules);
+      setEvents(outcome.events);
+      setActionError(outcome.error);
+    } finally {
+      if (!isCancelled()) {
+        setLoading(false);
+      }
+    }
+  }, [user]);
 
   useEffect(() => {
-    loadAlerts();
-  }, [user]);
+    let cancelled = false;
+    loadAlerts(() => cancelled);
+    return () => {
+      cancelled = true;
+    };
+  }, [loadAlerts]);
 
   const handleCreateRule = async (e: React.FormEvent) => {
     e.preventDefault();
+    const validation = validateAlertRuleInput({
+      locationName,
+      thresholdInput,
+      latitude: activeCity.latitude,
+      longitude: activeCity.longitude,
+    });
+
+    if (!validation.valid || validation.threshold === undefined || !validation.locationName) {
+      setFormError(validation.error || 'Please check alert rule inputs.');
+      return;
+    }
+
+    setSubmitting(true);
+    setFormError(null);
     try {
+      let targetLocationName = validation.locationName;
+      let targetLat = activeCity.latitude;
+      let targetLon = activeCity.longitude;
+
+      if (targetLocationName.toLowerCase() !== activeCity.name.trim().toLowerCase()) {
+        const matches = await api.searchLocations(targetLocationName);
+        if (!Array.isArray(matches) || matches.length === 0) {
+          setFormError(`Could not resolve geographic coordinates for "${targetLocationName}". Select a valid city name.`);
+          return;
+        }
+        const firstMatch = matches[0];
+        if (
+          typeof firstMatch.latitude !== 'number' ||
+          !Number.isFinite(firstMatch.latitude) ||
+          typeof firstMatch.longitude !== 'number' ||
+          !Number.isFinite(firstMatch.longitude)
+        ) {
+          setFormError(`Resolved location metadata for "${targetLocationName}" is invalid.`);
+          return;
+        }
+        targetLocationName = firstMatch.name || targetLocationName;
+        targetLat = firstMatch.latitude;
+        targetLon = firstMatch.longitude;
+      }
+
       await api.createAlertRule({
-        location_name: locationName,
-        latitude: activeCity.latitude,
-        longitude: activeCity.longitude,
-        threshold_aqi: threshold,
+        location_name: targetLocationName,
+        latitude: targetLat,
+        longitude: targetLon,
+        threshold_aqi: validation.threshold,
         pollutant,
         severity,
       });
+      if (!isMountedRef.current) return;
       setShowAddModal(false);
-      loadAlerts();
+      await loadAlerts(() => !isMountedRef.current);
     } catch (err: unknown) {
       const errMsg = err instanceof Error ? err.message : (typeof err === 'string' ? err : 'Failed to create rule');
-      alert(errMsg);
+      setFormError(errMsg);
+    } finally {
+      if (isMountedRef.current) {
+        setSubmitting(false);
+      }
     }
   };
 
   const handleDeleteRule = async (id: string) => {
-    await api.deleteAlertRule(id);
-    setRules(rules.filter((r) => r.id !== id));
+    setDeletingId(id);
+    setActionError(null);
+    try {
+      await api.deleteAlertRule(id);
+      if (!isMountedRef.current) return;
+      setRules((prev) => prev.filter((r) => r.id !== id));
+    } catch (err: unknown) {
+      if (!isMountedRef.current) return;
+      const errMsg =
+        err instanceof Error && err.message
+          ? err.message
+          : 'Failed to delete alert rule. Please try again.';
+      setActionError(errMsg);
+    } finally {
+      if (isMountedRef.current) {
+        setDeletingId(null);
+      }
+    }
   };
 
   if (!user) {
@@ -107,6 +296,8 @@ export const AlertsView: React.FC = () => {
         <button
           onClick={() => {
             setLocationName(activeCity.name);
+            setThresholdInput('100');
+            setFormError(null);
             setShowAddModal(true);
           }}
           className="px-4 py-2 bg-clima-accent dark:bg-darkClima-accent hover:opacity-90 text-white dark:text-darkClima-bg font-medium text-xs rounded-lg transition-colors flex items-center space-x-1.5 shadow-sm self-start sm:self-auto"
@@ -116,74 +307,106 @@ export const AlertsView: React.FC = () => {
         </button>
       </div>
 
-      {/* Rules List */}
-      <div className="bg-clima-surface dark:bg-darkClima-surface rounded-xl p-5 border border-clima-border dark:border-darkClima-border space-y-4 shadow-floating dark:shadow-floating-dark">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-clima-text dark:text-darkClima-text font-sans">
-          Configured Alert Rules ({rules.length})
-        </h3>
-
-        {rules.length === 0 ? (
-          <p className="text-xs text-clima-muted dark:text-darkClima-muted font-sans py-4 text-center">
-            No active alert rules configured yet. Click "New Alert Rule" above to create one.
-          </p>
-        ) : (
-          <div className="space-y-2.5">
-            {rules.map((rule) => (
-              <div
-                key={rule.id}
-                className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 border border-clima-border dark:border-darkClima-border rounded-lg p-3.5 flex items-center justify-between text-xs font-sans"
-              >
-                <div>
-                  <span className="font-bold text-clima-text dark:text-darkClima-text text-sm">{rule.location_name}</span>
-                  <div className="text-clima-muted dark:text-darkClima-muted text-xs mt-0.5">
-                    Trigger when <strong className="text-clima-accent dark:text-darkClima-accent uppercase font-mono">{rule.pollutant}</strong> exceeds{' '}
-                    <strong className="text-[#D5A33A] font-mono">{rule.threshold_aqi}</strong> (Severity: {rule.severity})
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => handleDeleteRule(rule.id)}
-                  className="text-clima-muted dark:text-darkClima-muted hover:text-[#C94E55] p-1.5 rounded hover:bg-clima-surface dark:hover:bg-darkClima-surface transition-colors"
-                  title="Delete rule"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            ))}
+      {actionError && (
+        <div
+          role="alert"
+          className="p-3.5 bg-red-500/10 border border-red-500/30 rounded-xl flex items-center justify-between gap-2 text-xs text-red-700 dark:text-red-300"
+        >
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>{actionError}</span>
           </div>
-        )}
-      </div>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            aria-label="Dismiss error"
+            className="p-1 rounded hover:bg-red-500/20"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
-      {/* Triggered Events History */}
-      <div className="bg-clima-surface dark:bg-darkClima-surface rounded-xl p-5 border border-clima-border dark:border-darkClima-border space-y-4 shadow-floating dark:shadow-floating-dark">
-        <h3 className="text-xs font-semibold uppercase tracking-wider text-clima-text dark:text-darkClima-text font-sans">
-          Threshold Breach Event Log ({events.length})
-        </h3>
-        {events.length === 0 ? (
-          <p className="text-xs text-clima-muted dark:text-darkClima-muted font-sans py-4 text-center">
-            No threshold breach events recorded. Monitored atmospheric levels are currently within safe limits.
-          </p>
-        ) : (
-          <div className="space-y-2.5">
-            {events.map((ev) => (
-              <div
-                key={ev.id}
-                className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 border border-clima-border dark:border-darkClima-border rounded-lg p-3.5 flex items-center justify-between text-xs font-sans"
-              >
-                <div className="flex items-center space-x-3">
-                  <AlertTriangle className="w-4 h-4 text-[#D5A33A] shrink-0" />
-                  <div>
-                    <span className="font-medium text-clima-text dark:text-darkClima-text">{ev.message}</span>
-                    <div className="text-[11px] text-clima-muted dark:text-darkClima-muted font-mono mt-0.5">
-                      {new Date(ev.triggered_at).toLocaleString()}
+      {loading ? (
+        <div className="flex items-center justify-center p-12 bg-clima-surface dark:bg-darkClima-surface rounded-xl border border-clima-border dark:border-darkClima-border">
+          <RefreshCw className="w-5 h-5 text-clima-accent dark:text-darkClima-accent animate-spin" />
+          <span className="ml-3 text-xs text-clima-muted dark:text-darkClima-muted font-sans">
+            Loading alert rules and threshold breach history...
+          </span>
+        </div>
+      ) : (
+        <>
+          {/* Rules List */}
+          <div className="bg-clima-surface dark:bg-darkClima-surface rounded-xl p-5 border border-clima-border dark:border-darkClima-border space-y-4 shadow-floating dark:shadow-floating-dark">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-clima-text dark:text-darkClima-text font-sans">
+              Configured Alert Rules ({rules.length})
+            </h3>
+
+            {rules.length === 0 ? (
+              <p className="text-xs text-clima-muted dark:text-darkClima-muted font-sans py-4 text-center">
+                No active alert rules configured yet. Click "New Alert Rule" above to create one.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {rules.map((rule) => (
+                  <div
+                    key={rule.id}
+                    className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 border border-clima-border dark:border-darkClima-border rounded-lg p-3.5 flex items-center justify-between text-xs font-sans"
+                  >
+                    <div>
+                      <span className="font-bold text-clima-text dark:text-darkClima-text text-sm">{rule.location_name}</span>
+                      <div className="text-clima-muted dark:text-darkClima-muted text-xs mt-0.5">
+                        Trigger when <strong className="text-clima-accent dark:text-darkClima-accent uppercase font-mono">{rule.pollutant}</strong> exceeds{' '}
+                        <strong className="text-[#D5A33A] font-mono">{rule.threshold_aqi}</strong> (Severity: {rule.severity})
+                      </div>
+                    </div>
+
+                    <button
+                      onClick={() => handleDeleteRule(rule.id)}
+                      disabled={deletingId === rule.id}
+                      className="text-clima-muted dark:text-darkClima-muted hover:text-[#C94E55] disabled:opacity-50 p-1.5 rounded hover:bg-clima-surface dark:hover:bg-darkClima-surface transition-colors"
+                      title="Delete rule"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Triggered Events History */}
+          <div className="bg-clima-surface dark:bg-darkClima-surface rounded-xl p-5 border border-clima-border dark:border-darkClima-border space-y-4 shadow-floating dark:shadow-floating-dark">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-clima-text dark:text-darkClima-text font-sans">
+              Threshold Breach Event Log ({events.length})
+            </h3>
+            {events.length === 0 ? (
+              <p className="text-xs text-clima-muted dark:text-darkClima-muted font-sans py-4 text-center">
+                No threshold breach events recorded. Monitored atmospheric levels are currently within safe limits.
+              </p>
+            ) : (
+              <div className="space-y-2.5">
+                {events.map((ev) => (
+                  <div
+                    key={ev.id}
+                    className="bg-clima-subtle/80 dark:bg-darkClima-subtle/80 border border-clima-border dark:border-darkClima-border rounded-lg p-3.5 flex items-center justify-between text-xs font-sans"
+                  >
+                    <div className="flex items-center space-x-3">
+                      <AlertTriangle className="w-4 h-4 text-[#D5A33A] shrink-0" />
+                      <div>
+                        <span className="font-medium text-clima-text dark:text-darkClima-text">{ev.message}</span>
+                        <div className="text-[11px] text-clima-muted dark:text-darkClima-muted font-mono mt-0.5">
+                          {new Date(ev.triggered_at).toLocaleString()}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
-        )}
-      </div>
+        </>
+      )}
 
       {/* Add Rule Modal */}
       {showAddModal && (
@@ -192,14 +415,27 @@ export const AlertsView: React.FC = () => {
             <div className="flex items-center justify-between border-b border-clima-border dark:border-darkClima-border pb-3">
               <h3 className="text-base font-bold text-clima-text dark:text-darkClima-text">Create Air Quality Alert Rule</h3>
               <button
-                onClick={() => setShowAddModal(false)}
+                onClick={() => {
+                  setFormError(null);
+                  setShowAddModal(false);
+                }}
                 className="text-clima-muted dark:text-darkClima-muted hover:text-clima-text dark:hover:text-darkClima-text"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
-            <form onSubmit={handleCreateRule} className="space-y-4 text-xs font-sans">
+            <form onSubmit={handleCreateRule} noValidate className="space-y-4 text-xs font-sans">
+              {formError && (
+                <div
+                  role="alert"
+                  className="p-2.5 bg-red-500/10 border border-red-500/30 rounded-lg text-red-700 dark:text-red-300 flex items-center space-x-2"
+                >
+                  <AlertTriangle className="w-4 h-4 shrink-0" />
+                  <span>{formError}</span>
+                </div>
+              )}
+
               <div>
                 <label htmlFor="alert-city-input" className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Monitored City or Region</label>
                 <input
@@ -208,7 +444,10 @@ export const AlertsView: React.FC = () => {
                   placeholder="e.g. Tokyo, London, Delhi"
                   aria-label="Monitored City or Region"
                   value={locationName}
-                  onChange={(e) => setLocationName(e.target.value)}
+                  onChange={(e) => {
+                    setLocationName(e.target.value);
+                    if (formError) setFormError(null);
+                  }}
                   className="w-full bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded-lg p-2.5 text-clima-text dark:text-darkClima-text focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent"
                   required
                 />
@@ -234,11 +473,15 @@ export const AlertsView: React.FC = () => {
                 <label htmlFor="alert-threshold-input" className="text-clima-text dark:text-darkClima-text font-medium block mb-1.5">Threshold Level</label>
                 <input
                   id="alert-threshold-input"
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="e.g. 100"
                   aria-label="Threshold Level"
-                  value={threshold}
-                  onChange={(e) => setThreshold(Number(e.target.value))}
+                  value={thresholdInput}
+                  onChange={(e) => {
+                    setThresholdInput(e.target.value);
+                    if (formError) setFormError(null);
+                  }}
                   className="w-full bg-clima-subtle dark:bg-darkClima-subtle border border-clima-border dark:border-darkClima-border rounded-lg p-2.5 text-clima-text dark:text-darkClima-text font-mono focus:outline-none focus:border-clima-accent dark:focus:border-darkClima-accent"
                   required
                 />
@@ -260,16 +503,20 @@ export const AlertsView: React.FC = () => {
               <div className="flex justify-end space-x-2.5 pt-3">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
+                  onClick={() => {
+                    setFormError(null);
+                    setShowAddModal(false);
+                  }}
                   className="px-4 py-2 bg-clima-subtle dark:bg-darkClima-subtle hover:bg-clima-border dark:hover:bg-darkClima-border text-clima-muted dark:text-darkClima-muted rounded-lg border border-clima-border dark:border-darkClima-border transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-5 py-2 bg-clima-accent dark:bg-darkClima-accent hover:opacity-90 text-white dark:text-darkClima-bg font-medium rounded-lg transition-colors shadow-sm"
+                  disabled={submitting}
+                  className="px-5 py-2 bg-clima-accent dark:bg-darkClima-accent hover:opacity-90 disabled:opacity-60 text-white dark:text-darkClima-bg font-medium rounded-lg transition-colors shadow-sm"
                 >
-                  Save Alert Rule
+                  {submitting ? 'Saving...' : 'Save Alert Rule'}
                 </button>
               </div>
             </form>

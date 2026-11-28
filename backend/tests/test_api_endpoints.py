@@ -105,12 +105,18 @@ async def test_analytics_endpoints():
 async def test_aqi_calculate_endpoint():
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        payload = {"pm25": 12.0, "pm10": 20.0}
-        resp = await client.post("/api/v1/aqi/calculate?standard=US_EPA", json=payload)
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["aqi"] == 50
-        assert data["category"] == "Good"
+        # May 2024 EPA PM2.5 Good ceiling is 9.0 ug/m3 (50 Good); 12.0 ug/m3 is now 56 Moderate
+        resp_good = await client.post("/api/v1/aqi/calculate?standard=US_EPA", json={"pm25": 9.0, "pm10": 20.0})
+        assert resp_good.status_code == 200
+        good_data = resp_good.json()
+        assert good_data["aqi"] == 50
+        assert good_data["category"] == "Good"
+
+        resp_mod = await client.post("/api/v1/aqi/calculate?standard=US_EPA", json={"pm25": 12.0, "pm10": 20.0})
+        assert resp_mod.status_code == 200
+        mod_data = resp_mod.json()
+        assert mod_data["aqi"] == 56
+        assert mod_data["category"] == "Moderate"
 
 @pytest.mark.asyncio
 async def test_reports_endpoints():
@@ -299,3 +305,60 @@ async def test_auth_expired_and_invalid_tokens_rejected():
         expired_resp = await client.get("/api/v1/auth/me", headers={"Authorization": f"Bearer {expired_token}"})
         assert expired_resp.status_code == 401
         assert "Authentication credentials were not provided or invalid" in expired_resp.json()["detail"]
+
+
+@pytest.mark.asyncio
+async def test_api_coordinate_standard_and_auth_validation():
+    """Verify invalid geographic coordinates, short passwords, and standard aliases are properly handled."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        assert (await client.get("/api/v1/air-quality/current?lat=99&lon=10")).status_code == 422
+        assert (await client.get("/api/v1/air-quality/current?lat=10&lon=181")).status_code == 422
+        assert (await client.get("/api/v1/analytics/trends?lat=nan&lon=0")).status_code == 422
+        assert (await client.get("/api/v1/locations/stations?lat=-91&lon=0")).status_code == 422
+
+        short_pwd_resp = await client.post(
+            "/api/v1/auth/register",
+            json={"email": f"short_{uuid.uuid4().hex[:6]}@aerosense.ai", "password": "123"},
+        )
+        assert short_pwd_resp.status_code == 422
+
+        comp_resp = await client.get("/api/v1/analytics/compare?cities=Tokyo&standard=cpcb")
+        assert comp_resp.status_code == 200
+        assert comp_resp.json()["standard"] == "INDIA_CPCB"
+
+
+def test_schema_whitespace_validation_regressions():
+    """P2: Reject empty/whitespace-only password, AlertRuleCreate.location_name, and SavedLocationCreate.name."""
+    from pydantic import ValidationError
+    from app.schemas.auth import UserCreate
+    from app.schemas.alert import AlertRuleCreate
+    from app.api.v1.users import SavedLocationCreate
+
+    # 1. UserCreate.password: reject empty & whitespace-only without trimming legitimate passwords
+    for bad_pw in ("", "     ", "      ", "\t\n  \r  "):
+        with pytest.raises(ValidationError):
+            UserCreate(email="user@aerosense.ai", password=bad_pw)
+
+    padded_pw = "  secret123  "
+    user_padded = UserCreate(email="user@aerosense.ai", password=padded_pw)
+    assert user_padded.password == padded_pw  # never trimmed or mutated
+    assert UserCreate(email="user@aerosense.ai", password="SecurePass123").password == "SecurePass123"
+
+    # 2. AlertRuleCreate.location_name: reject empty/whitespace-only and strip surrounding whitespace
+    for bad_loc in ("", "   ", "\t\n "):
+        with pytest.raises(ValidationError):
+            AlertRuleCreate(location_name=bad_loc, latitude=28.61, longitude=77.21)
+
+    rule_trimmed = AlertRuleCreate(location_name="  New Delhi  ", latitude=28.61, longitude=77.21)
+    assert rule_trimmed.location_name == "New Delhi"
+    assert AlertRuleCreate(location_name="Bengaluru", latitude=12.97, longitude=77.59).location_name == "Bengaluru"
+
+    # 3. SavedLocationCreate.name: reject empty/whitespace-only and strip surrounding whitespace
+    for bad_name in ("", "   ", "\t\r\n"):
+        with pytest.raises(ValidationError):
+            SavedLocationCreate(name=bad_name, latitude=19.07, longitude=72.87)
+
+    loc_trimmed = SavedLocationCreate(name="  Mumbai Station  ", latitude=19.07, longitude=72.87)
+    assert loc_trimmed.name == "Mumbai Station"
+    assert SavedLocationCreate(name="Tokyo", latitude=35.68, longitude=139.76).name == "Tokyo"

@@ -1,28 +1,33 @@
 import React from 'react';
 import { useAQI } from '../../context/AQIContext';
-import { ShieldCheck, AlertTriangle, AlertOctagon, Info, Flame } from 'lucide-react';
+import { resolveStandardAqiDisplay, resolveStandardBreakdownDisplay } from './OverviewDashboard';
+import { ShieldCheck, AlertTriangle, AlertOctagon, Info } from 'lucide-react';
 
 export const AQIScoreCard: React.FC = () => {
   const { airQuality, standard, activeCity } = useAQI();
 
   if (!airQuality) return null;
 
-  const currentResult = airQuality.aqi_standard_results[standard] || airQuality.aqi_standard_results['US_EPA'];
-  const aqiValue = currentResult.aqi !== null ? currentResult.aqi : '--';
-  const category = currentResult.category;
-  const dominant = airQuality.dominant_pollutant || 'PM2.5';
-  const color = currentResult.color || '#10b981';
+  const {
+    hasFiniteAqi,
+    aqiDisplay: aqiValue,
+    category,
+    dominantPollutant: dominant,
+    color,
+    advisory,
+  } = resolveStandardAqiDisplay(airQuality, standard, '--');
 
   const getCategoryIcon = () => {
-    if (typeof aqiValue === 'number') {
-      if (aqiValue > 200) return <AlertOctagon className="w-5 h-5 text-red-500" />;
-      if (aqiValue > 100) return <AlertTriangle className="w-5 h-5 text-amber-500" />;
+    if (!hasFiniteAqi || typeof aqiValue !== 'number') {
+      return <Info className="w-5 h-5 text-slate-400" />;
     }
+    if (aqiValue > 200) return <AlertOctagon className="w-5 h-5 text-red-500" />;
+    if (aqiValue > 100) return <AlertTriangle className="w-5 h-5 text-amber-500" />;
     return <ShieldCheck className="w-5 h-5 text-emerald-400" />;
   };
 
   return (
-    <div className="card-metric rounded-lg p-5 terminal-border relative overflow-hidden">
+    <div className="bg-navy-900/95 border border-slate-800 rounded-lg p-5 shadow-floating-dark relative overflow-hidden">
       {/* Background Subtle Gradient Glow */}
       <div
         className="absolute -top-12 -right-12 w-48 h-48 rounded-full blur-3xl opacity-15 pointer-events-none"
@@ -86,14 +91,17 @@ export const AQIScoreCard: React.FC = () => {
           <span className="text-[10px] font-mono uppercase tracking-wider text-slate-500 block">
             Standard Breakdown
           </span>
-          {Object.entries(airQuality.aqi_standard_results).map(([stdKey, res]) => (
-            <div key={stdKey} className="flex items-center justify-between text-xs font-mono">
-              <span className="text-slate-400">{stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB' : 'EAQI'}:</span>
-              <span className="font-semibold" style={{ color: res.color }}>
-                {res.aqi !== null ? res.aqi : 'N/A'}
-              </span>
-            </div>
-          ))}
+          {Object.entries(airQuality.aqi_standard_results || {}).map(([stdKey, res]) => {
+            const breakdown = resolveStandardBreakdownDisplay(res, 'N/A');
+            return (
+              <div key={stdKey} className="flex items-center justify-between text-xs font-mono">
+                <span className="text-slate-400">{stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB' : 'EAQI'}:</span>
+                <span className="font-semibold" style={{ color: breakdown.color }}>
+                  {breakdown.aqiDisplay}
+                </span>
+              </div>
+            );
+          })}
         </div>
       </div>
 
@@ -101,7 +109,7 @@ export const AQIScoreCard: React.FC = () => {
       <div className="mt-5 pt-4 border-t border-slate-800/80 flex items-start space-x-2.5">
         <Info className="w-4 h-4 text-slate-400 shrink-0 mt-0.5" />
         <p className="text-xs sm:text-sm text-slate-300 leading-relaxed">
-          {currentResult.advisory}
+          {advisory}
         </p>
       </div>
     </div>

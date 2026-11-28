@@ -1,7 +1,12 @@
+import logging
 from fastapi import APIRouter
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any, Dict, Optional
 import httpx
 from app.core.config import settings
+from app.core.redaction import format_safe_exception, redact_sensitive_text
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/system", tags=["System & Health"])
 
@@ -10,9 +15,9 @@ _health_cache = {
     "data": None,
     "timestamp": 0.0
 }
-_network_status_cache = {
+_network_status_cache: Dict[str, Any] = {
     "data": None,
-    "timestamp": 0.0
+    "expires_at": None
 }
 
 @router.get("/health")
@@ -38,37 +43,58 @@ async def get_network_status():
     Never hardcodes statuses. Reflects actual API configuration and responsiveness.
     """
     now = datetime.now(timezone.utc)
-    now_ts = now.timestamp()
     now_iso = now.isoformat()
 
-    if _network_status_cache["data"] and (now_ts - _network_status_cache["timestamp"] < 120):
+    cached_expires_at: Optional[datetime] = _network_status_cache.get("expires_at")
+    if (
+        _network_status_cache.get("data") is not None
+        and cached_expires_at is not None
+        and now < cached_expires_at
+    ):
         return _network_status_cache["data"]
 
-    # 1. WAQI Status Check
+    # 1. WAQI Status Check (WAQI API requires query parameter ?token= per upstream contract)
     waqi_status = "not_configured"
     waqi_details = "API key not provided"
     if settings.WAQI_API_KEY:
         try:
             async with httpx.AsyncClient(timeout=4.0) as client:
-                res = await client.get(f"https://api.waqi.info/feed/here/?token={settings.WAQI_API_KEY}")
+                res = await client.get(
+                    "https://api.waqi.info/feed/here/",
+                    params={"token": settings.WAQI_API_KEY},
+                )
                 if res.status_code == 200 and res.json().get("status") == "ok":
                     waqi_status = "connected"
                     waqi_details = "Live ground station feed operational"
                 elif res.status_code == 200:
                     waqi_status = "degraded"
-                    waqi_details = f"WAQI API warning: {res.json().get('data')}"
+                    safe_data = redact_sensitive_text(res.json().get("data", "unknown"), [settings.WAQI_API_KEY])
+                    waqi_details = f"WAQI API warning: {safe_data[:120]}"
                 else:
                     waqi_status = "unavailable"
                     waqi_details = f"WAQI HTTP {res.status_code}"
-        except Exception as e:
+        except httpx.TimeoutException as e:
+            logger.warning("[System] WAQI health probe timed out: %s", format_safe_exception(e, [settings.WAQI_API_KEY]))
             waqi_status = "unavailable"
-            waqi_details = f"Timeout / connection failure: {str(e)[:40]}"
+            waqi_details = "Request timed out contacting WAQI API"
+        except httpx.HTTPStatusError as e:
+            logger.warning("[System] WAQI health probe HTTP error: %s", format_safe_exception(e, [settings.WAQI_API_KEY]))
+            waqi_status = "unavailable"
+            waqi_details = f"WAQI HTTP {e.response.status_code}"
+        except httpx.RequestError as e:
+            logger.warning("[System] WAQI health probe request failure: %s", format_safe_exception(e, [settings.WAQI_API_KEY]))
+            waqi_status = "unavailable"
+            waqi_details = f"WAQI connection failure ({type(e).__name__})"
+        except Exception as e:
+            logger.warning("[System] WAQI health probe unexpected failure: %s", format_safe_exception(e, [settings.WAQI_API_KEY]))
+            waqi_status = "unavailable"
+            waqi_details = f"WAQI probe error ({type(e).__name__})"
 
     # 2. Open-Meteo Model Status Check
     from app.services.providers.open_meteo import open_meteo_provider
     open_meteo_status = "connected"
     open_meteo_details = "Operational"
-    if open_meteo_provider._cache:
+    if open_meteo_provider.has_cached_data():
         open_meteo_status = "connected"
         open_meteo_details = "CAMS atmospheric model active (high-speed cached)"
     else:
@@ -85,8 +111,9 @@ async def get_network_status():
                     open_meteo_status = "degraded"
                     open_meteo_details = f"HTTP {res.status_code}"
         except Exception as e:
+            logger.warning("[System] Open-Meteo health probe error: %s", format_safe_exception(e))
             open_meteo_status = "degraded"
-            open_meteo_details = f"Connection error: {str(e)[:40]}"
+            open_meteo_details = f"Connection error ({type(e).__name__})"
 
     # 3. Gemini GenAI Status Check
     gemini_status = "not_configured"
@@ -145,5 +172,5 @@ async def get_network_status():
         }
     }
     _network_status_cache["data"] = result
-    _network_status_cache["timestamp"] = now_ts
+    _network_status_cache["expires_at"] = now + timedelta(seconds=120)
     return result

@@ -1,6 +1,13 @@
 import React from 'react';
 import { useAQI } from '../../context/AQIContext';
 import { Calendar } from 'lucide-react';
+import {
+  formatHourlyPm25,
+  getAqiScaleColor,
+  resolveForecastAqi,
+} from '../../utils/airQualityHelpers';
+
+export { formatHourlyPm25, resolveForecastAqi };
 
 export const ForecastTimeline: React.FC = () => {
   const { airQuality } = useAQI();
@@ -9,16 +16,7 @@ export const ForecastTimeline: React.FC = () => {
 
   // Show next 24 hourly forecast points
   const next24h = airQuality.forecast.slice(0, 24);
-
-  const getAQIColor = (aqi?: number) => {
-    if (!aqi) return '#647570';
-    if (aqi <= 50) return '#23966B';
-    if (aqi <= 100) return '#D5A33A';
-    if (aqi <= 150) return '#E27C42';
-    if (aqi <= 200) return '#C94E55';
-    if (aqi <= 300) return '#8E44AD';
-    return '#5B2C6F';
-  };
+  const isSynthesizedForecast = next24h.some((pt) => Boolean(pt?.is_synthesized));
 
   return (
     <div className="bg-clima-surface dark:bg-darkClima-surface border border-clima-border dark:border-darkClima-border rounded-xl p-5 shadow-floating dark:shadow-floating-dark space-y-3 font-sans">
@@ -30,7 +28,7 @@ export const ForecastTimeline: React.FC = () => {
           </span>
         </div>
         <span className="text-[10px] font-mono text-clima-muted dark:text-darkClima-muted">
-          ECMWF Copernicus CAMS Ensemble
+          {isSynthesizedForecast ? 'Ground-Anchored Diurnal Projection' : 'ECMWF Copernicus CAMS Ensemble'}
         </span>
       </div>
 
@@ -38,9 +36,11 @@ export const ForecastTimeline: React.FC = () => {
         <div className="flex space-x-2 min-w-max">
           {next24h.map((item, idx) => {
             const timeObj = new Date(item.time);
-            const hourLabel = timeObj.toLocaleTimeString([], { hour: 'numeric', hour12: true });
-            const aqi = item.us_aqi || Math.round((item.pm25 || 10) * 2.2);
-            const color = getAQIColor(aqi);
+            const hourLabel = Number.isNaN(timeObj.getTime())
+              ? String(item.time || '--')
+              : timeObj.toLocaleTimeString([], { hour: 'numeric', hour12: true });
+            const aqi = resolveForecastAqi(item);
+            const color = getAqiScaleColor(aqi);
 
             return (
               <div
@@ -52,16 +52,16 @@ export const ForecastTimeline: React.FC = () => {
                   className="text-sm font-bold font-mono my-1"
                   style={{ color }}
                 >
-                  {aqi}
+                  {aqi !== null ? aqi : '—'}
                 </span>
                 <div className="w-full h-1.5 bg-clima-border dark:bg-darkClima-border rounded-full overflow-hidden">
                   <div
                     className="h-full rounded-full"
-                    style={{ width: `${Math.min(100, (aqi / 250) * 100)}%`, backgroundColor: color }}
+                    style={{ width: aqi !== null ? `${Math.min(100, (aqi / 250) * 100)}%` : '0%', backgroundColor: color }}
                   />
                 </div>
                 <span className="text-[9px] text-clima-muted dark:text-darkClima-muted font-mono mt-1">
-                  {item.pm25 !== undefined ? `${Math.round(item.pm25)} µg` : '—'}
+                  {formatHourlyPm25(item.pm25)}
                 </span>
               </div>
             );

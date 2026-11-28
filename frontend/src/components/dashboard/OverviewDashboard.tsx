@@ -1,7 +1,12 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { useAQI } from '../../context/AQIContext';
-import { AQIStandard } from '../../types/airQuality';
+import { AQIStandard, AQIStandardResult, AirQualityResponse } from '../../types/airQuality';
 import { ForecastTimeline } from './ForecastTimeline';
+import {
+  WHO_GUIDELINES,
+  calculatePollutantExposureRatio,
+  getAqiScaleColor,
+} from '../../utils/airQualityHelpers';
 import {
   Radio,
   RefreshCw,
@@ -11,14 +16,108 @@ import {
   Cpu,
   Sparkles,
   ArrowRight,
-  TrendingUp,
-  TrendingDown,
-  Minus,
   Globe,
-  BellRing,
-  ExternalLink,
-  Layers
+  BellRing
 } from 'lucide-react';
+
+function isFiniteNumber(val: unknown): val is number {
+  return typeof val === 'number' && Number.isFinite(val);
+}
+
+function normalizeFiniteNumber(val: number): number {
+  return Object.is(val, -0) ? 0 : val;
+}
+
+export interface ResolvedStandardBreakdownDisplay {
+  hasFiniteAqi: boolean;
+  aqiDisplay: number | string;
+  color: string;
+  category: string;
+}
+
+export interface ResolvedStandardAqiDisplay extends ResolvedStandardBreakdownDisplay {
+  dominantPollutant: string;
+  advisory: string;
+}
+
+/**
+ * Resolves display metadata for an individual AQI regulatory standard entry
+ * while rejecting null/undefined/NaN/Infinity and preserving genuine 0 AQI.
+ */
+export function resolveStandardBreakdownDisplay(
+  result: AQIStandardResult | undefined,
+  unavailableText: string = '—'
+): ResolvedStandardBreakdownDisplay {
+  const rawAqi = result?.aqi;
+  const hasFiniteAqi = isFiniteNumber(rawAqi);
+  const aqiDisplay = hasFiniteAqi ? normalizeFiniteNumber(rawAqi) : unavailableText;
+  const color = hasFiniteAqi
+    ? result?.color || getAqiScaleColor(rawAqi)
+    : '#647570';
+  const category = result?.category?.trim() ? result.category : 'Unavailable';
+
+  return { hasFiniteAqi, aqiDisplay, color, category };
+}
+
+/**
+ * Resolves primary AQI score-card and dashboard summary metrics without fabricating
+ * default pollutants or healthy-green styling when AQI data is missing.
+ */
+export function resolveStandardAqiDisplay(
+  airQuality: Pick<AirQualityResponse, 'aqi_standard_results' | 'dominant_pollutant'>,
+  standard: AQIStandard,
+  unavailableText: string = '—'
+): ResolvedStandardAqiDisplay {
+  const currentResult =
+    airQuality.aqi_standard_results?.[standard] || airQuality.aqi_standard_results?.['US_EPA'];
+  const base = resolveStandardBreakdownDisplay(currentResult, unavailableText);
+  const stdDominant = currentResult?.dominant_pollutant?.trim();
+  const topDominant = airQuality.dominant_pollutant?.trim();
+  const dominantPollutant = stdDominant
+    ? stdDominant
+    : base.hasFiniteAqi && topDominant
+    ? topDominant
+    : 'Unavailable';
+  const advisory = currentResult?.advisory?.trim()
+    ? currentResult.advisory
+    : 'Air quality health advisory is currently unavailable.';
+
+  return {
+    ...base,
+    dominantPollutant,
+    advisory,
+  };
+}
+
+/**
+ * Resolves verified telemetry observation mode from actual finite pollutant measurements.
+ */
+export function resolveObservationSourceStatus(
+  airQuality: Pick<AirQualityResponse, 'measurements' | 'is_ground_observation' | 'primary_source'>
+): {
+  mode: 'ground' | 'model' | 'unavailable';
+  primarySource: string;
+} {
+  const validMeasurements = Object.values(airQuality.measurements || {}).filter(
+    (m) => Boolean(m) && isFiniteNumber(m.value)
+  );
+  const hasGround = validMeasurements.some((m) => m.measurement_type === 'ground_observation');
+  const hasModel = validMeasurements.some(
+    (m) => m.measurement_type !== 'ground_observation' && m.measurement_type !== 'unavailable'
+  );
+
+  let mode: 'ground' | 'model' | 'unavailable' = 'unavailable';
+  if (hasGround || (validMeasurements.length > 0 && airQuality.is_ground_observation)) {
+    mode = 'ground';
+  } else if (hasModel) {
+    mode = 'model';
+  }
+
+  return {
+    mode,
+    primarySource: airQuality.primary_source?.trim() ? airQuality.primary_source : 'Unavailable',
+  };
+}
 
 interface OverviewDashboardProps {
   onNavigateToMap?: () => void;
@@ -30,7 +129,6 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
   onNavigateToAlerts,
 }) => {
   const { airQuality, loading, error, activeCity, popularCities, setActiveCity, standard, setStandard } = useAQI();
-  const [selectedChartPollutant, setSelectedChartPollutant] = useState<'pm25' | 'pm10' | 'no2' | 'o3'>('pm25');
 
   if (loading && !airQuality) {
     return (
@@ -55,24 +153,30 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
 
   if (!airQuality) return null;
 
-  const currentResult = airQuality.aqi_standard_results[standard] || airQuality.aqi_standard_results['US_EPA'];
-  const aqiValue = currentResult.aqi !== null ? currentResult.aqi : '—';
-  const category = currentResult.category;
-  const dominant = airQuality.dominant_pollutant || 'PM2.5';
-  const aqiColor = currentResult.color || '#16865C';
+  const {
+    hasFiniteAqi,
+    aqiDisplay: aqiValue,
+    category,
+    dominantPollutant: dominant,
+    color: aqiColor,
+    advisory: currentAdvisory,
+  } = resolveStandardAqiDisplay(airQuality, standard);
+  const observationStatus = resolveObservationSourceStatus(airQuality);
 
-  // WHO 24-hr guideline reference benchmarks
-  const whoGuidelines: Record<string, { whoLimit: number; name: string; formula: string; unit: string; period: string }> = {
-    pm25: { whoLimit: 15, name: 'Fine Particulate Matter', formula: 'PM2.5', unit: 'µg/m³', period: '24h mean' },
-    pm10: { whoLimit: 45, name: 'Coarse Particulate Matter', formula: 'PM10', unit: 'µg/m³', period: '24h mean' },
-    no2:  { whoLimit: 25, name: 'Nitrogen Dioxide', formula: 'NO₂', unit: 'µg/m³', period: '24h mean' },
-    so2:  { whoLimit: 40, name: 'Sulphur Dioxide', formula: 'SO₂', unit: 'µg/m³', period: '24h mean' },
-    co:   { whoLimit: 4,  name: 'Carbon Monoxide', formula: 'CO', unit: 'mg/m³', period: '24h mean' },
-    o3:   { whoLimit: 100, name: 'Tropospheric Ozone', formula: 'O₃', unit: 'µg/m³', period: '8h peak' },
-  };
+  // WHO 24-hr guideline reference benchmarks from shared intelligence module
+  const whoGuidelines = WHO_GUIDELINES;
 
   return (
     <div className="space-y-5 max-w-7xl mx-auto pb-12 font-sans">
+      {error && (
+        <div
+          role="alert"
+          className="p-3.5 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-800/60 rounded-xl flex items-center space-x-2.5 text-xs text-red-700 dark:text-red-300"
+        >
+          <ShieldAlert className="w-4 h-4 text-red-500 shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
       {/* 1. Global Metropolises Quick Filter Strip */}
       <div className="bg-atlas-surface dark:bg-darkAtlas-surface border border-atlas-border dark:border-darkAtlas-border rounded-xl px-4 py-2.5 flex items-center space-x-2 overflow-x-auto scrollbar-none shadow-subtle">
         <span className="text-[11px] text-atlas-muted dark:text-darkAtlas-muted font-semibold uppercase tracking-wider shrink-0 mr-1 flex items-center">
@@ -103,27 +207,36 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
       <div className="bg-atlas-subtle/80 dark:bg-darkAtlas-subtle/80 border border-atlas-border dark:border-darkAtlas-border rounded-xl px-4 py-2.5 flex flex-wrap items-center justify-between gap-3 text-xs">
         <div className="flex items-center space-x-3 text-atlas-text dark:text-darkAtlas-text">
           <div className="flex items-center space-x-1.5">
-            {airQuality.is_ground_observation ? (
+            {observationStatus.mode === 'ground' ? (
               <span className="flex items-center text-atlas-success dark:text-darkAtlas-success font-semibold font-mono text-[11px]">
                 <Radio className="w-3.5 h-3.5 mr-1" />
                 Physical Ground Observation
               </span>
-            ) : (
+            ) : observationStatus.mode === 'model' ? (
               <span className="flex items-center text-atlas-secondary dark:text-darkAtlas-secondary font-semibold font-mono text-[11px]">
                 <Cpu className="w-3.5 h-3.5 mr-1" />
                 Modelled Atmospheric Estimate
+              </span>
+            ) : (
+              <span className="flex items-center text-atlas-muted dark:text-darkAtlas-muted font-semibold font-mono text-[11px]">
+                <Info className="w-3.5 h-3.5 mr-1" />
+                Observations Unavailable
               </span>
             )}
           </div>
           <span className="text-atlas-border dark:text-darkAtlas-border">|</span>
           <span className="text-atlas-muted dark:text-darkAtlas-muted truncate max-w-md font-sans">
-            Source: <strong className="text-atlas-text dark:text-darkAtlas-text">{airQuality.primary_source}</strong>
+            Source: <strong className="text-atlas-text dark:text-darkAtlas-text">{observationStatus.primarySource}</strong>
           </span>
         </div>
 
         <div className="flex items-center space-x-4 text-[11px] text-atlas-muted dark:text-darkAtlas-muted font-mono">
           <span>{activeCity.latitude.toFixed(4)}°N, {activeCity.longitude.toFixed(4)}°E</span>
-          <span className="text-atlas-text dark:text-darkAtlas-text">Updated ~{airQuality.data_freshness_minutes}m ago</span>
+          <span className="text-atlas-text dark:text-darkAtlas-text">
+            {isFiniteNumber(airQuality.data_freshness_minutes)
+              ? `Updated ~${normalizeFiniteNumber(airQuality.data_freshness_minutes)}m ago`
+              : 'Timestamp unavailable'}
+          </span>
         </div>
       </div>
 
@@ -188,7 +301,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             {/* Health Advisory Summary */}
             <div className="mt-5 p-4 bg-atlas-subtle dark:bg-darkAtlas-subtle border border-atlas-border dark:border-darkAtlas-border rounded-xl text-xs text-atlas-text dark:text-darkAtlas-text leading-relaxed font-sans flex items-start space-x-2.5">
               <Info className="w-4 h-4 text-atlas-accent dark:text-darkAtlas-accent shrink-0 mt-0.5" />
-              <span>{currentResult.advisory}</span>
+              <span>{currentAdvisory}</span>
             </div>
           </div>
 
@@ -198,27 +311,30 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               Regulatory Standards Cross-Reference:
             </span>
             <div className="grid grid-cols-3 gap-2.5 text-center text-xs">
-              {Object.entries(airQuality.aqi_standard_results).map(([stdKey, res]) => (
-                <div
-                  key={stdKey}
-                  onClick={() => setStandard(stdKey as AQIStandard)}
-                  className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
-                    standard === stdKey
-                      ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle border-atlas-accent dark:border-darkAtlas-accent text-atlas-text dark:text-darkAtlas-text shadow-sm'
-                      : 'bg-atlas-surface dark:bg-darkAtlas-surface border-atlas-border dark:border-darkAtlas-border text-atlas-muted dark:text-darkAtlas-muted hover:border-atlas-accent'
-                  }`}
-                >
-                  <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted block font-sans">
-                    {stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB' : 'EAQI'}
-                  </span>
-                  <span className="text-lg font-bold font-mono mt-0.5 block" style={{ color: res.color }}>
-                    {res.aqi !== null ? res.aqi : '—'}
-                  </span>
-                  <span className="text-[10px] block truncate text-atlas-muted dark:text-darkAtlas-muted mt-0.5 font-sans">
-                    {res.category}
-                  </span>
-                </div>
-              ))}
+              {Object.entries(airQuality.aqi_standard_results || {}).map(([stdKey, res]) => {
+                const breakdown = resolveStandardBreakdownDisplay(res);
+                return (
+                  <div
+                    key={stdKey}
+                    onClick={() => setStandard(stdKey as AQIStandard)}
+                    className={`p-2.5 rounded-lg border cursor-pointer transition-all ${
+                      standard === stdKey
+                        ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle border-atlas-accent dark:border-darkAtlas-accent text-atlas-text dark:text-darkAtlas-text shadow-sm'
+                        : 'bg-atlas-surface dark:bg-darkAtlas-surface border-atlas-border dark:border-darkAtlas-border text-atlas-muted dark:text-darkAtlas-muted hover:border-atlas-accent'
+                    }`}
+                  >
+                    <span className="text-[10px] text-atlas-muted dark:text-darkAtlas-muted block font-sans">
+                      {stdKey === 'US_EPA' ? 'US EPA' : stdKey === 'INDIA_CPCB' ? 'CPCB' : 'EAQI'}
+                    </span>
+                    <span className="text-lg font-bold font-mono mt-0.5 block" style={{ color: breakdown.color }}>
+                      {breakdown.aqiDisplay}
+                    </span>
+                    <span className="text-[10px] block truncate text-atlas-muted dark:text-darkAtlas-muted mt-0.5 font-sans">
+                      {breakdown.category}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           </div>
         </div>
@@ -249,10 +365,11 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                 </thead>
                 <tbody className="divide-y divide-atlas-border/60 dark:divide-darkAtlas-border/60 text-atlas-text dark:text-darkAtlas-text font-sans">
                   {Object.entries(whoGuidelines).map(([key, cfg]) => {
-                    const meas = airQuality.measurements[key];
-                    const val = meas && meas.value !== null ? meas.value : null;
-                    const isGround = meas && meas.measurement_type === 'ground_observation';
-                    const ratio = val !== null ? Math.round((val / cfg.whoLimit) * 100) : null;
+                    const meas = airQuality.measurements?.[key];
+                    const val = meas && isFiniteNumber(meas.value) ? normalizeFiniteNumber(meas.value) : null;
+                    const isGround = val !== null && meas.measurement_type === 'ground_observation';
+                    const ratioVal = val !== null ? calculatePollutantExposureRatio(key, val) : null;
+                    const ratio = ratioVal !== null && Number.isFinite(ratioVal) ? Math.round(ratioVal * 100) : null;
                     const isOverWHO = ratio !== null && ratio > 100;
 
                     return (
@@ -286,7 +403,7 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                                   className={`h-full rounded-full ${
                                     isOverWHO ? 'bg-atlas-warning dark:bg-darkAtlas-warning' : 'bg-atlas-success dark:bg-darkAtlas-success'
                                   }`}
-                                  style={{ width: `${Math.min(100, ratio)}%` }}
+                                  style={{ width: `${Math.min(100, Math.max(0, ratio))}%` }}
                                 />
                               </div>
                             </div>
@@ -296,11 +413,13 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
                         </td>
                         <td className="py-2.5 pl-3 text-right">
                           <span className={`text-[10px] px-2 py-0.5 rounded font-mono ${
-                            isGround
+                            val === null
+                              ? 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-muted dark:text-darkAtlas-muted'
+                              : isGround
                               ? 'bg-atlas-success/15 text-atlas-success dark:text-darkAtlas-success border border-atlas-success/30'
                               : 'bg-atlas-subtle dark:bg-darkAtlas-subtle text-atlas-muted dark:text-darkAtlas-muted'
                           }`}>
-                            {isGround ? 'Ground Sensor' : 'Model Estimate'}
+                            {val === null ? 'Unavailable' : isGround ? 'Ground Sensor' : 'Model Estimate'}
                           </span>
                         </td>
                       </tr>
@@ -344,7 +463,21 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-atlas-muted dark:text-darkAtlas-muted">Sensor Coverage:</span>
-                <span className="font-mono font-semibold text-atlas-success dark:text-darkAtlas-success">Active Ground Grid</span>
+                <span
+                  className={`font-mono font-semibold ${
+                    observationStatus.mode === 'ground'
+                      ? 'text-atlas-success dark:text-darkAtlas-success'
+                      : observationStatus.mode === 'model'
+                      ? 'text-atlas-secondary dark:text-darkAtlas-secondary'
+                      : 'text-atlas-muted dark:text-darkAtlas-muted'
+                  }`}
+                >
+                  {observationStatus.mode === 'ground'
+                    ? 'Active Ground Grid'
+                    : observationStatus.mode === 'model'
+                    ? 'Modelled Atmospheric Grid'
+                    : 'Coverage Unavailable'}
+                </span>
               </div>
             </div>
           </div>
@@ -376,7 +509,15 @@ export const OverviewDashboard: React.FC<OverviewDashboardProps> = ({
             </div>
 
             <p className="mt-3 text-xs text-atlas-text dark:text-darkAtlas-text leading-relaxed font-sans">
-              Ambient air quality in {activeCity.name} is currently categorized as <strong style={{ color: aqiColor }}>{category}</strong> with an index of <strong className="font-mono">{aqiValue}</strong> ({standard.replace('_', ' ')}). The primary contributor to exposure risk is <strong className="font-mono text-atlas-accent dark:text-darkAtlas-accent">{dominant}</strong>. Atmospheric transport dispersion indicates stable boundary layer conditions over the coming hours.
+              {hasFiniteAqi ? (
+                <>
+                  Ambient air quality in {activeCity.name} is currently categorized as <strong style={{ color: aqiColor }}>{category}</strong> with an index of <strong className="font-mono">{aqiValue}</strong> ({standard.replace('_', ' ')}). The primary contributor to exposure risk is <strong className="font-mono text-atlas-accent dark:text-darkAtlas-accent">{dominant}</strong>. Atmospheric transport dispersion indicates stable boundary layer conditions over the coming hours.
+                </>
+              ) : (
+                <>
+                  Real-time AQI telemetry for {activeCity.name} ({standard.replace('_', ' ')}) is currently unavailable. Dominant pollutant and health risk classification will appear once valid observations arrive.
+                </>
+              )}
             </p>
           </div>
 

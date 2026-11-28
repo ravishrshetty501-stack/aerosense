@@ -2,17 +2,19 @@ from fastapi import APIRouter, Query
 from typing import List
 from app.services.providers.manager import data_manager
 from app.services.alert_service import alert_service
+from app.services.aqi.engine import normalize_standard_name
 
 router = APIRouter(prefix="/analytics", tags=["Analytics"])
 
 @router.get("/trends")
 async def get_trends(
-    lat: float = Query(...),
-    lon: float = Query(...),
+    lat: float = Query(..., ge=-90.0, le=90.0, allow_inf_nan=False),
+    lon: float = Query(..., ge=-180.0, le=180.0, allow_inf_nan=False),
     city: str = Query("Query City")
 ):
     res = await data_manager.get_unified_air_quality(lat, lon, city)
-    current_pm25 = res.measurements.get("pm25").value if res.measurements.get("pm25") else 0
+    pm25_meas = res.measurements.get("pm25")
+    current_pm25 = pm25_meas.value if pm25_meas is not None else None
     spike_info = alert_service.detect_spike(res.hourly_history or [], current_pm25, "pm25")
     
     return {
@@ -45,6 +47,7 @@ async def compare_cities(
     results = []
     seen_coords = set()
 
+    canonical_standard = normalize_standard_name(standard)
     for c in unique_city_queries[:5]:
         locs = await data_manager.search_cities(c)
         if locs:
@@ -55,8 +58,8 @@ async def compare_cities(
                 continue
             seen_coords.add(coord_key)
 
-            aq_res = await data_manager.get_unified_air_quality(t["latitude"], t["longitude"], t["name"], standard)
-            std_res = aq_res.aqi_standard_results.get(standard, {})
+            aq_res = await data_manager.get_unified_air_quality(t["latitude"], t["longitude"], t["name"], canonical_standard)
+            std_res = aq_res.aqi_standard_results.get(canonical_standard, {})
             results.append({
                 "city": t["name"],
                 "country": t.get("country"),
@@ -75,4 +78,4 @@ async def compare_cities(
                 "freshness_minutes": aq_res.data_freshness_minutes
             })
 
-    return {"standard": standard, "comparison": results}
+    return {"standard": canonical_standard, "comparison": results}
